@@ -6,10 +6,11 @@ Bionluk üzerindeki yeni alıcı isteklerini ve iş fırsatlarını takip eden, 
 
 ## 🚀 Öne Çıkan Özellikler
 
-1. **Tamamen Yerel ve Güvenli:**
+1. **Tamamen Yerel ve Güvenli (Google ile Giriş Uyumlu):**
    - Şifrenizi veya hesap bilgilerinizi herhangi bir dosyaya ya da koda yazmanız gerekmez.
-   - Uygulama içindeki **"Bionluk'a Giriş Yap"** butonu, ayrı bir güvenli tarayıcı profili (`data/browser_profile`) açar. Kendi hesabınıza elle giriş yaparsınız ve oturumunuz yerel olarak korunur.
-   - Günlük Chrome profilinize dokunulmaz.
+   - Uygulama içindeki **"Bionluk'a Giriş Yap"** butonu, bilgisayarınızda kurulu standart Google Chrome'u otomasyon veya test bayrakları olmadan bağımsız bir süreç olarak açar. Böylece Google'ın "Bu tarayıcı veya uygulama güvenli olmayabilir" engeline takılmadan Google hesabınızla rahatça giriş yapabilirsiniz.
+   - Günlük kullandığınız Chrome profilinize dokunulmaz; uygulamaya özel `data/chrome_profile` dizininde oturumunuz yerel ve kalıcı olarak korunur.
+   - Tarama aşamasında Playwright `channel="chrome"` kullanarak bu profille tutarlı çalışır.
    - Sunucu, bulut veya harici ücretli API gerektirmez.
 
 2. **Dinamik Tarama Süresi ve Akıllı Bekleme:**
@@ -88,8 +89,9 @@ Uygulamanın çalışması için bilgisayarınızda **Python 3.10+** kurulu olma
    - İlk açılışta veritabanı ve ayarlar otomatik hazırlanır.
 2. **Hesabınıza Giriş Yapın:**
    - Üstteki **"Bionluk'a Giriş Yap (Tarayıcı Aç)"** butonuna tıklayın.
-   - Açılan tarayıcı penceresinde Bionluk hesabınıza kendi e-posta/şifrenizle giriş yapın.
-   - Giriş tamamlandıktan sonra bu tarayıcı penceresini kapatın. Oturumunuz bu bilgisayarda saklanır.
+   - Bilgisayarınızda kurulu normal Google Chrome açılacaktır. "Google ile Giriş Yap" veya e-posta/şifrenizle Bionluk hesabınıza giriş yapın.
+   - Giriş tamamlandıktan sonra bu açılan Chrome penceresini kapatın.
+   - Uygulama oturumunuzu otomatik olarak doğrulayacak ve durum rozetini "OTURUM AKTİF" yapacaktır. Oturumunuz bu bilgisayarda saklanır.
 3. **Takip URL'sini Belirleyin:**
    - "Tarama & Sistem Ayarları" sekmesinde Bionluk alıcı istekleri sayfasının bağlantısını girin ve "URL'yi Kaydet"e tıklayın.
 4. **Filtrelerinizi Ayarlayın:**

@@ -37,8 +37,22 @@ class MockScraperAdapter(BaseScraperAdapter):
             listings=list(self.listings),
         )
 
-    def open_login_session(self, url: str):
+    def open_login_session(self, url: str, on_complete_callback=None):
         self.login_opened = True
+        if on_complete_callback:
+            on_complete_callback(True, "Oturum doğrulandı (Mock)")
+
+    def verify_session(self, url: str = "https://bionluk.com"):
+        if self.requires_login_flag:
+            return False, "Oturum açık değil"
+        return True, "Oturum aktif"
+
+    def is_login_in_progress(self) -> bool:
+        return False
+
+    def is_profile_locked(self) -> bool:
+        return False
 
     def close(self):
         self.closed = True
+

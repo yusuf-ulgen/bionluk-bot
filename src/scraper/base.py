@@ -47,11 +47,27 @@ class BaseScraperAdapter(ABC):
         pass
 
     @abstractmethod
-    def open_login_session(self, url: str):
+    def open_login_session(self, url: str, on_complete_callback=None):
         """Kullanıcının güvenle kendi hesabına giriş yapması için tarayıcı açar."""
+        pass
+
+    @abstractmethod
+    def verify_session(self, url: str = "https://bionluk.com") -> Tuple[bool, str]:
+        """Bionluk oturumunun gerçekten açık olup olmadığını doğrular."""
+        pass
+
+    @abstractmethod
+    def is_login_in_progress(self) -> bool:
+        """Kullanıcının manuel giriş oturumunun açık olup olmadığını döner."""
+        pass
+
+    @abstractmethod
+    def is_profile_locked(self) -> bool:
+        """Tarayıcı profil dizininin başka bir süreç tarafından kilitli olup olmadığını döner."""
         pass
 
     @abstractmethod
     def close(self):
         """Tarayıcı ve açık kaynakları temizler."""
         pass
+

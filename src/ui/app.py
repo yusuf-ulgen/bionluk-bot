@@ -347,6 +347,14 @@ class BionlukBotApp:
     # --- BUTON VE AKSİYON İŞLEYİCİLERİ ---
 
     def _start_scanning(self):
+        if self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked():
+            messagebox.showwarning(
+                "Giriş Penceresi Açık",
+                "Chrome giriş penceresi şu anda açık veya profil kullanımda.\n\n"
+                "Lütfen Bionluk hesabınıza giriş yaptıktan sonra açılan Chrome penceresini kapatın.",
+            )
+            return
+
         self.btn_start.configure(state=tk.DISABLED)
         self.btn_stop.configure(state=tk.NORMAL)
         self.scheduler.start()
@@ -357,20 +365,63 @@ class BionlukBotApp:
         self.btn_stop.configure(state=tk.DISABLED)
 
     def _scan_now(self):
+        if self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked():
+            messagebox.showwarning(
+                "Giriş Penceresi Açık",
+                "Chrome giriş penceresi şu anda açık veya profil kullanımda.\n\n"
+                "Lütfen giriş işlemini tamamlayıp Chrome penceresini kapatın.",
+            )
+            return
+
         self.scheduler.trigger_now()
         self.btn_start.configure(state=tk.DISABLED)
         self.btn_stop.configure(state=tk.NORMAL)
 
     def _open_login_browser(self):
-        """Kullanıcının güvenle oturum açması için tarayıcı açar."""
+        """Kullanıcının güvenle oturum açması için bağımsız Google Chrome açar."""
+        if self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked():
+            messagebox.showinfo(
+                "Giriş Zaten Açık",
+                "Chrome giriş penceresi zaten açık durumda.\n\n"
+                "Lütfen açık olan Chrome penceresini kullanarak giriş yapın ve ardından pencereyi kapatın.",
+            )
+            return
+
         messagebox.showinfo(
-            "Bionluk Giriş Penceresi",
-            "Açılacak tarayıcı penceresinde Bionluk hesabınıza kendi bilgilerinizle giriş yapın.\n\n"
-            "Giriş işlemini ve varsa 2 faktörlü doğrulamayı tamamladıktan sonra tarayıcıyı kapatabilirsiniz. "
-            "Oturumunuz bu bilgisayarda güvenle saklanacaktır.",
+            "Bionluk Google / Manuel Giriş",
+            "Bilgisayarınızda kurulu standart Google Chrome açılacaktır.\n\n"
+            "1. Açılan Chrome penceresinde 'Google ile Giriş Yap' butonuna veya e-posta/şifre alanına tıklayarak hesabınıza giriş yapın.\n"
+            "2. Giriş tamamlandıktan sonra açılan Chrome penceresini kapatın.\n\n"
+            "Pencere kapatıldığında uygulamanız oturum durumunu otomatik olarak doğrulayacaktır.",
         )
         url = self.config_mgr.config.target_url
-        self.scraper_adapter.open_login_session(url)
+        self.lbl_status_msg.configure(text="Durum: Chrome giriş penceresi açık, giriş yapılması bekleniyor...")
+        self.badge_lbl.configure(text="GİRİŞ AÇIK", bg="#feebc8", fg="#7b341e")
+
+        self.scraper_adapter.open_login_session(url, on_complete_callback=self._on_login_completed)
+
+    def _on_login_completed(self, success: bool, msg: str):
+        """Chrome kapandıktan sonra oturum doğrulama sonucunu arayüzde gösterir."""
+        def _ui_update():
+            if success:
+                self.badge_lbl.configure(text="OTURUM AKTİF", bg="#c6f6d5", fg="#22543d")
+                self.lbl_status_msg.configure(text="Durum: Oturum başarıyla doğrulandı. Taramaya hazır.")
+                messagebox.showinfo(
+                    "Oturum Doğrulandı",
+                    "Tebrikler! Bionluk hesabınız başarıyla doğrulandı.\n\n"
+                    "Artık 'Taramayı Başlat' düğmesine basarak ilan takibini başlatabilirsiniz.",
+                )
+            else:
+                self.badge_lbl.configure(text="GİRİŞ GEREKİYOR", bg="#fed7d7", fg="#9b2c2c")
+                self.lbl_status_msg.configure(text=f"Durum: {msg[:50]}")
+                messagebox.showwarning(
+                    "Oturum Doğrulanamadı",
+                    f"Giriş penceresi kapatıldı ancak geçerli bir Bionluk oturumu tespit edilemedi:\n\n"
+                    f"{msg}\n\n"
+                    f"Lütfen 'Bionluk'a Giriş Yap' düğmesine basarak hesabınıza başarıyla giriş yaptığınızdan emin olun.",
+                )
+
+        self.root.after(0, _ui_update)
 
     def _send_test_notification(self):
         ok, err = self.notifier.send_test_notification()

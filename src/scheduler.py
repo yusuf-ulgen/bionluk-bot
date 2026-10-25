@@ -160,6 +160,14 @@ class JobScheduler:
 
     def _execute_scan(self):
         """Tek bir tarama işlemi yürütür."""
+        if hasattr(self.scraper_adapter, "is_login_in_progress") and (
+            self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked()
+        ):
+            logger.info("Chrome giriş penceresi açık olduğu için bu tarama döngüsü atlandı.")
+            self.status.status_message = "Giriş penceresi açık (Chrome'un kapanması bekleniyor)"
+            self._notify_status()
+            return
+
         if not self._scan_lock.acquire(blocking=False):
             logger.warning("Önceki tarama henüz tamamlanmadı, yeni tarama atlandı.")
             return

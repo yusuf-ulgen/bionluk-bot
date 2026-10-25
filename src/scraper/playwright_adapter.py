@@ -1,16 +1,21 @@
 """
-Bionluk için Playwright tabanlı kazıma ve oturum yönetimi adaptörü.
-Ayrı bir yerel tarayıcı profili (user_data_dir) kullanarak kullanıcının kendi oturumunu korur.
+Bionluk için Google Chrome tabanlı kazıma ve oturum yönetimi adaptörü.
+Google ile giriş engelini aşmak için:
+- Manuel girişte bilgisayarda kurulu standart Google Chrome bağımsız süreç olarak açılır.
+- Tarama sırasında Playwright channel="chrome" ile aynı yerel profili kullanır.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
+import os
 import re
+import shutil
+import subprocess
 import threading
+import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from playwright.sync_api import sync_playwright
 
@@ -19,66 +24,232 @@ from .base import BaseScraperAdapter, Listing, ScrapeResult
 logger = logging.getLogger("bionluk_bot.scraper.playwright")
 
 
+def find_chrome_executable() -> Optional[Path]:
+    """Bilgisayarda kurulu standart Google Chrome çalıştırılabilir dosyasını bulur."""
+    # 1. Özel ortam değişkeni
+    env_path = os.environ.get("CHROME_PATH")
+    if env_path and os.path.isfile(env_path):
+        return Path(env_path)
+
+    # 2. Standart Windows yolları
+    candidates = [
+        Path(os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe")),
+        Path(os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe")),
+        Path(os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    # 3. Windows Registry
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
+            val, _ = winreg.QueryValueEx(key, "")
+            if val and os.path.isfile(val):
+                return Path(val)
+    except Exception:
+        pass
+
+    # 4. PATH üzerinde arama
+    which_path = shutil.which("chrome") or shutil.which("google-chrome")
+    if which_path:
+        return Path(which_path)
+
+    return None
+
+
 class PlaywrightBionlukAdapter(BaseScraperAdapter):
     def __init__(self, profile_dir: Path | str | None = None, headless: bool = True):
         if profile_dir is None:
             base_dir = Path(__file__).resolve().parent.parent.parent
-            self.profile_dir = base_dir / "data" / "browser_profile"
+            self.profile_dir = base_dir / "data" / "chrome_profile"
         else:
             self.profile_dir = Path(profile_dir)
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self.headless = headless
         self._lock = threading.Lock()
-        self._active_login_process = None
+        self._active_login_process: Optional[subprocess.Popen] = None
+        self._is_logging_in = False
 
-    def open_login_session(self, url: str):
+    def is_login_in_progress(self) -> bool:
+        """Kullanıcının manuel giriş penceresinin açık olup olmadığını döner."""
+        if self._active_login_process is not None:
+            if self._active_login_process.poll() is None:
+                return True
+            else:
+                self._active_login_process = None
+        return self._is_logging_in
+
+    def is_profile_locked(self) -> bool:
+        """Tarayıcı profil dizininin Chrome tarafından kilitli olup olmadığını kontrol eder."""
+        if self.is_login_in_progress():
+            return True
+
+        lock_file = self.profile_dir / "lockfile"
+        if not lock_file.exists():
+            return False
+
+        try:
+            with open(lock_file, "r+b"):
+                return False
+        except (IOError, OSError, PermissionError):
+            return True
+
+    def open_login_session(self, url: str, on_complete_callback: Optional[Callable[[bool, str], None]] = None):
         """
-        Kullanıcının hesaba manuel giriş yapması için görünür (headed) bir tarayıcı penceresi açar.
-        Oturum 'data/browser_profile' dizininde saklanır.
+        Kullanıcının Google hesabı veya e-posta ile güvenle giriş yapması için
+        bilgisayarda kurulu normal Google Chrome'u otomasyonsuz (standalone) süreç olarak açar.
         """
-        def _login_thread():
+        chrome_path = find_chrome_executable()
+        if not chrome_path:
+            msg = (
+                "Bilgisayarınızda Google Chrome bulunamadı.\n\n"
+                "Google ile sorunsuz giriş yapabilmek için lütfen Google Chrome'u kurun:\n"
+                "https://www.google.com/chrome/"
+            )
+            logger.error(msg)
+            if on_complete_callback:
+                on_complete_callback(False, msg)
+            return
+
+        if self.is_profile_locked():
+            msg = "Giriş penceresi veya Chrome şu anda zaten açık. Lütfen mevcut pencereyi kullanın veya kapatın."
+            logger.warning(msg)
+            if on_complete_callback:
+                on_complete_callback(False, msg)
+            return
+
+        def _login_worker():
             with self._lock:
-                logger.info("Kullanıcı giriş oturumu için tarayıcı açılıyor...")
-                with sync_playwright() as p:
-                    # Kullanıcının görebileceği şekilde headless=False aç
-                    context = p.chromium.launch_persistent_context(
-                        user_data_dir=str(self.profile_dir),
-                        headless=False,
-                        viewport={"width": 1280, "height": 800},
-                        args=["--start-maximized"],
-                    )
-                    page = context.pages[0] if context.pages else context.new_page()
-                    try:
-                        login_target = url if ("giris" in url or "login" in url) else "https://bionluk.com"
-                        page.goto(login_target, wait_until="domcontentloaded", timeout=45000)
-                        logger.info("Giriş sayfası açıldı. Kullanıcının giriş yapması ve pencereyi kapatması bekleniyor.")
-                        
-                        # Kullanıcı tarayıcıyı kapatana kadar bekle
-                        page.wait_for_event("close", timeout=0)
-                    except Exception as e:
-                        logger.debug(f"Giriş penceresi kapandı veya sonlandı: {e}")
-                    finally:
-                        try:
-                            context.close()
-                        except Exception:
-                            pass
-                        logger.info("Giriş oturumu tamamlandı ve profil kaydedildi.")
+                self._is_logging_in = True
+                login_target = url if ("giris" in url or "login" in url) else "https://bionluk.com/giris"
+                logger.info(f"Normal Google Chrome açılıyor: {chrome_path} (Hedef: {login_target})")
 
-        threading.Thread(target=_login_thread, daemon=True, name="BionlukLoginWorker").start()
+                # Standart Chrome parametreleri (Otomasyon, remote debugging veya stealth YOK!)
+                cmd = [
+                    str(chrome_path),
+                    f"--user-data-dir={self.profile_dir.resolve()}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    login_target,
+                ]
+
+                try:
+                    self._active_login_process = subprocess.Popen(cmd)
+                    logger.info("Chrome başlatıldı. Kullanıcının giriş yapması ve tarayıcıyı kapatması bekleniyor...")
+
+                    # Kullanıcı Chrome'u kapatana kadar bekle
+                    self._active_login_process.wait()
+                except Exception as e:
+                    logger.error(f"Chrome başlatılırken hata: {e}")
+                    self._is_logging_in = False
+                    self._active_login_process = None
+                    if on_complete_callback:
+                        on_complete_callback(False, f"Chrome başlatılamadı: {e}")
+                    return
+
+                self._active_login_process = None
+
+                # Chrome'un profil kilit dosyasını bırakması için kısa bekleme
+                for _ in range(10):
+                    if not self.is_profile_locked():
+                        break
+                    time.sleep(0.5)
+
+                self._is_logging_in = False
+                logger.info("Chrome kapatıldı. Gerçek Bionluk oturumu doğrulanıyor...")
+
+                # Oturumu doğrula
+                is_valid, verify_msg = self.verify_session()
+                logger.info(f"Oturum doğrulama sonucu: {is_valid} ({verify_msg})")
+
+                if on_complete_callback:
+                    on_complete_callback(is_valid, verify_msg)
+
+        threading.Thread(target=_login_worker, daemon=True, name="ChromeLoginWorker").start()
+
+    def verify_session(self, url: str = "https://bionluk.com") -> Tuple[bool, str]:
+        """
+        Bionluk oturumunun gerçekten açık olup olmadığını Playwright ile doğrular.
+        Sadece tarayıcının kapanmasını yeterli görmez; gerçek sayfa durumunu denetler.
+        """
+        if self.is_profile_locked():
+            return False, "Chrome pencereleri henüz tamamen kapanmadı. Lütfen açık Chrome pencerelerini kapatın."
+
+        chrome_path = find_chrome_executable()
+        if not chrome_path:
+            return False, "Google Chrome bulunamadı."
+
+        try:
+            with sync_playwright() as p:
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir=str(self.profile_dir.resolve()),
+                    channel="chrome",
+                    headless=True,
+                )
+                page = context.pages[0] if context.pages else context.new_page()
+
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                    page.wait_for_timeout(1500)
+                except Exception as nav_err:
+                    context.close()
+                    return False, f"Oturum kontrol edilirken sayfaya erişilemedi: {nav_err}"
+
+                # 1. Giriş yapılmadığının açık göstergeleri
+                has_signin_button = page.locator(".signin-button, a[href*='/giris']").count() > 0
+
+                # 2. Giriş yapıldığının göstergeleri (avatar, profil, hesap bağlantıları)
+                has_user_element = page.locator(
+                    ".user-avatar, a[href*='/hesabim'], a[href*='/profil'], [class*='profile-box'], [class*='user-menu']"
+                ).count() > 0
+
+                # 3. Çerez kontrolü
+                cookies = context.cookies()
+                cookie_names = [c["name"].lower() for c in cookies if "bionluk" in c.get("domain", "").lower()]
+                has_session_cookie = any("session" in n or "remember" in n for n in cookie_names)
+
+                context.close()
+
+                if has_user_element or (has_session_cookie and not has_signin_button):
+                    return True, "Bionluk oturumu aktif ve başarıyla doğrulandı."
+                else:
+                    return False, "Bionluk oturumu açık görünmüyor. Lütfen 'Bionluk'a Giriş Yap' ile hesabınıza giriş yapın."
+
+        except Exception as e:
+            logger.error(f"Oturum doğrulama sırasında beklenmeyen hata: {e}")
+            return False, f"Oturum doğrulanamadı: {e}"
 
     def scrape_listings(self, url: str) -> ScrapeResult:
         """
         Belirtilen sayfaya giderek alıcı isteklerini/ilanları toplar.
-        Thread güvenliği için kilit kullanır.
+        Playwright channel="chrome" kullanarak girişteki profil ile tarama yapar.
         """
+        # Giriş penceresi açıksa veya profil kullanımda ise tarama başlatma
+        if self.is_profile_locked():
+            return ScrapeResult(
+                success=False,
+                error_message="Giriş penceresi veya Chrome şu anda açık. Lütfen girişinizi tamamlayıp Chrome'u kapatın.",
+                requires_login=True,
+            )
+
+        chrome_path = find_chrome_executable()
+        if not chrome_path:
+            return ScrapeResult(
+                success=False,
+                error_message="Google Chrome bulunamadı. Lütfen Chrome'u kurun.",
+                requires_login=True,
+            )
+
         with self._lock:
             try:
                 with sync_playwright() as p:
                     context = p.chromium.launch_persistent_context(
-                        user_data_dir=str(self.profile_dir),
+                        user_data_dir=str(self.profile_dir.resolve()),
+                        channel="chrome",
                         headless=self.headless,
-                        args=["--disable-blink-features=AutomationControlled"],
                     )
                     page = context.pages[0] if context.pages else context.new_page()
 
@@ -147,7 +318,6 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
 
                     # 5. Boş liste kontrolü: Gerçekten 0 istek mi var yoksa sayfa açılamadı / oturum mu yok?
                     if not listings:
-                        # Sayfada giriş/kayıt butonları var mı?
                         has_login_button = "signin-button" in page_content or "giriş yap" in page_content
                         is_target_different = url.rstrip("/") != current_url.rstrip("/") and ("giris" in current_url or current_url == "https://bionluk.com")
 
@@ -159,7 +329,6 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                                 requires_login=True,
                             )
 
-                        # Sayfada geçerli bir 'boş istek' mesajı veya istek listesi kapsayıcısı var mı?
                         empty_indicators = [
                             "alıcı isteği bulunamadı",
                             "henüz alıcı isteği bulunmuyor",
@@ -191,18 +360,12 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                 )
 
     def _parse_listings_from_page(self, page) -> List[Listing]:
-        """
-        Sayfadaki alıcı isteklerini DOM öğelerinden çıkarır.
-        Gerçek Bionluk sayfasındaki olası HTML kart yapılarını destekler.
-        """
+        """Sayfadaki alıcı isteklerini DOM öğelerinden çıkarır."""
         results: List[Listing] = []
 
-        # Bionluk Alıcı İstekleri kartları veya satırları için tarama
-        # JavaScript yardımıyla DOM üzerinde arama yapıyoruz:
         items_data = page.evaluate("""() => {
             const items = [];
             
-            // 1. Olası kart ve liste seçicileri
             const cardSelectors = [
                 '.custom-order-item',
                 '.buyer-request-item',
@@ -224,7 +387,6 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                 }
             }
 
-            // 2. Eğer özel sınıf bulunamazsa, 'teklif ver' veya istek bağlantısı içeren kapsayıcıları bul
             if (elements.length === 0) {
                 const actionLinks = Array.from(document.querySelectorAll('a, button')).filter(el => {
                     const txt = (el.innerText || '').toLowerCase();
@@ -234,7 +396,6 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
 
                 const parentContainers = new Set();
                 actionLinks.forEach(link => {
-                    // En mantıklı kart kapsayıcısını bul
                     let parent = link.parentElement;
                     let depth = 0;
                     while (parent && depth < 5) {
@@ -249,13 +410,11 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                 elements = Array.from(parentContainers);
             }
 
-            // 3. Her bir elemandan verileri çek
             elements.forEach((el, index) => {
                 const textContent = el.innerText || '';
                 const linkEl = el.querySelector('a[href*="istek"], a[href*="alici"], a[href*="siparis"], a') || el.closest('a');
                 const url = linkEl ? linkEl.href : window.location.href;
 
-                // Başlık bulma
                 const headingEl = el.querySelector('h1, h2, h3, h4, h5, .title, strong, [class*="title"]');
                 let title = headingEl ? headingEl.innerText.trim() : '';
                 if (!title) {
@@ -263,7 +422,6 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                     title = lines[0] || ('İlan #' + (index + 1));
                 }
 
-                // Açıklama bulma
                 let description = '';
                 const descEl = el.querySelector('.description, .desc, p, [class*="description"], [class*="detail"]');
                 if (descEl && descEl !== headingEl) {
@@ -272,21 +430,18 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                     description = textContent;
                 }
 
-                // Bütçe bulma (TL, ₺, $, € içeren metin)
                 let budget = '';
                 const priceMatch = textContent.match(/(\\d+[\\.,]?\\d*\\s*(?:TL|₺|USD|EUR|\\$|€))/i);
                 if (priceMatch) {
                     budget = priceMatch[1].trim();
                 }
 
-                // Kategori bulma
                 let category = '';
                 const catEl = el.querySelector('.category, [class*="category"], .badge');
                 if (catEl) {
                     category = catEl.innerText.trim();
                 }
 
-                // ID tespiti: URL'deki sayı veya link veya sıra
                 let id = '';
                 const idMatch = url.match(/\\/(\\d+)(?:[\\/?#]|$)/);
                 if (idMatch) {
@@ -294,7 +449,6 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                 } else if (url && url !== window.location.href) {
                     id = url;
                 } else {
-                    // İçerik karması (hash)
                     id = 'item_' + index + '_' + title.slice(0, 20);
                 }
 
@@ -326,5 +480,12 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
         return results
 
     def close(self):
-        """Açık kalan oturumları temizler."""
-        logger.info("Playwright adaptörü kapatıldı.")
+        """Açık kalan oturum ve süreçleri temizler."""
+        if self._active_login_process is not None:
+            try:
+                self._active_login_process.terminate()
+                self._active_login_process.wait(timeout=3)
+            except Exception:
+                pass
+            self._active_login_process = None
+        logger.info("Playwright / Chrome adaptörü kapatıldı.")

@@ -39,6 +39,7 @@ data/
 logs/
 session/
 browser_profile/
+chrome_profile/
 
 # OS Specific
 .DS_Store
