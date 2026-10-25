@@ -566,17 +566,17 @@ class BionlukBotApp:
         return img
 
     def _setup_tray(self):
-        if self.tray_icon:
+        if self.tray_icon and self.is_tray_running:
             return
 
         image = self._create_tray_image()
         menu = pystray.Menu(
-            pystray.MenuItem("Pencereyi Göster", self._show_window_from_tray, default=True),
-            pystray.MenuItem("Şimdi Tara", lambda: self.scheduler.trigger_now()),
-            pystray.MenuItem("Çıkış", self._exit_app_completely),
+            pystray.MenuItem("Pencereyi Göster", lambda: self.root.after(0, self._restore_window), default=True),
+            pystray.MenuItem("Şimdi Tara", lambda: self.root.after(0, self.scheduler.trigger_now)),
+            pystray.MenuItem("Çıkış", lambda: self.root.after(0, self._exit_app_completely)),
         )
         self.tray_icon = pystray.Icon("BionlukBot", image, "Bionluk İlan Takipçisi", menu)
-        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        threading.Thread(target=self.tray_icon.run, daemon=True, name="TrayThread").start()
         self.is_tray_running = True
 
     def _show_window_from_tray(self):

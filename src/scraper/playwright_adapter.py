@@ -137,13 +137,45 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                     # 4. Sayfadaki ilanları/alıcı isteklerini ayrıştır
                     listings = self._parse_listings_from_page(page)
 
-                    # Eğer URL 404 döndüyse ve ilan bulunamadıysa
+                    # Eğer URL 404 döndüyse
                     if status_code == 404 and not listings:
                         context.close()
                         return ScrapeResult(
                             success=False,
                             error_message=f"Belirtilen sayfa bulunamadı (404 Not Found): {url}. Lütfen ayarlarınızdaki URL'yi kontrol edin.",
                         )
+
+                    # 5. Boş liste kontrolü: Gerçekten 0 istek mi var yoksa sayfa açılamadı / oturum mu yok?
+                    if not listings:
+                        # Sayfada giriş/kayıt butonları var mı?
+                        has_login_button = "signin-button" in page_content or "giriş yap" in page_content
+                        is_target_different = url.rstrip("/") != current_url.rstrip("/") and ("giris" in current_url or current_url == "https://bionluk.com")
+
+                        if has_login_button or is_target_different:
+                            context.close()
+                            return ScrapeResult(
+                                success=False,
+                                error_message="Bionluk oturumu açık değil veya ana sayfaya yönlendirildi. Lütfen 'Bionluk'a Giriş Yap' ile oturum açın.",
+                                requires_login=True,
+                            )
+
+                        # Sayfada geçerli bir 'boş istek' mesajı veya istek listesi kapsayıcısı var mı?
+                        empty_indicators = [
+                            "alıcı isteği bulunamadı",
+                            "henüz alıcı isteği bulunmuyor",
+                            "uygun alıcı isteği yok",
+                            "alıcı istekleri",
+                            "özel alıcı isteklerim",
+                            "bana uygun alıcı istekleri",
+                        ]
+                        has_valid_indicator = any(ind in page_content for ind in empty_indicators)
+
+                        if not has_valid_indicator:
+                            context.close()
+                            return ScrapeResult(
+                                success=False,
+                                error_message="Sayfa yapısı değişmiş veya beklenen alıcı istekleri içeriği bulunamadı. Sayfa içeriği doğrulanamadı.",
+                            )
 
                     context.close()
                     return ScrapeResult(

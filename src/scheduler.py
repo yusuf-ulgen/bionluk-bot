@@ -127,7 +127,7 @@ class JobScheduler:
             logger.info(f"Sonraki taramaya kadar bekleniyor: {wait_seconds} saniye.")
             remaining = wait_seconds
 
-            # Bekleme döngüsü (0.5 saniyelik adımlarla kontrol)
+            # Bekleme döngüsü (stop_event kontrollü)
             while remaining > 0 and not self._stop_event.is_set():
                 if self._trigger_now_event.is_set():
                     self._trigger_now_event.clear()
@@ -138,7 +138,15 @@ class JobScheduler:
                 self.status.status_message = f"Sonraki taramaya: {remaining} sn"
                 self._notify_status()
 
-                time.sleep(1.0)
+                # 1.0 saniyelik adımlarla bekle, stop sinyalinde anında çık
+                if self._stop_event.wait(timeout=1.0):
+                    break
+
+                # Kullanıcı çalışma anında tarama aralığını düşürdüyse kalan süreyi hemen uyarla
+                cfg_interval = self.config_mgr.config.scan_interval_seconds
+                if remaining > cfg_interval:
+                    remaining = cfg_interval
+
                 remaining -= 1
 
             self.status.seconds_until_next_scan = 0
@@ -205,11 +213,17 @@ class JobScheduler:
             new_items_count = 0
 
             if is_first_baseline:
-                logger.info("İlk başarılı tarama: Mevcut ilanlar başlangıç kaydı (baseline) olarak kaydediliyor.")
+                # Boş liste veya yüklenmemiş sayfa ile başlangıç kaydı oluşturulmamalı (bildirim yağmurunu önleme)
+                if len(listings) == 0:
+                    logger.warning("İlk taramada sayfada ilan tespit edilemedi; başlangıç kaydı geçerli bir sayfa okumasına kadar ertelendi.")
+                    self.status.status_message = "İlk tarama: İlan tespit edilemedi (Başlangıç kaydı bekleniyor)"
+                    self.storage.log_scan(success=True, items_found=0, new_items_count=0)
+                    return
+
+                logger.info(f"İlk başarılı tarama: {len(listings)} ilan başlangıç kaydı (baseline) olarak alınıyor.")
                 for item in listings:
-                    # Filtreyi değerlendir
                     eval_res = self.filter_engine.evaluate(item.title, item.description)
-                    # Baseline ilanlarını bildirilmiş gibi kaydet (bildirim yağmurunu önle)
+                    # Baseline ilanlarını bildirilmiş gibi kaydet (eski ilan bildirim yağmurunu önle)
                     self.storage.save_listing(
                         listing_id=item.id,
                         url=item.url,
@@ -221,18 +235,30 @@ class JobScheduler:
                         matched_keyword=eval_res.matched_include or "Başlangıç Kaydı",
                     )
                 self.storage.set_baseline_established()
-                self.status.status_message = f"İlk tarama tamamlandı ({len(listings)} ilan kaydedildi)"
+                self.status.status_message = f"İlk tarama tamamlandı ({len(listings)} ilan başlangıç kaydı alındı)"
             else:
                 # Normal tarama döngüsü: Yeni ilanları değerlendir
                 for item in listings:
                     if self.storage.is_listing_seen(item.id):
+                        # Bildirimi daha önce başarısız olmuş eşleşen ilanlar için kontrollü tekrar deneme (max 3)
+                        if self.storage.should_retry_notification(item.id, max_retries=3):
+                            logger.info(f"Teslim edilemeyen ilan için bildirim tekrar deneniyor: {item.title}")
+                            budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
+                            matched_kw = self.storage.get_matched_keyword(item.id) or "Filtre Eşleşmesi"
+                            msg = f"{item.title}{budget_info}\nEşleşen: {matched_kw}"
+                            sent_ok, send_err = self.notifier.send_notification(
+                                title="Yeni Bionluk İlanı!",
+                                message=msg,
+                                url=item.url,
+                            )
+                            self.storage.record_notification_result(item.id, sent_ok, send_err)
                         continue
 
                     # İlan daha önce görülmemiş
                     eval_res = self.filter_engine.evaluate(item.title, item.description)
                     if not eval_res.is_match:
                         logger.debug(f"İlan filtreye takıldı: {item.title} ({eval_res.reason})")
-                        # Filtreye uymasa da tekrar kontrol edilmemesi için veritabanına ekle (notified=True)
+                        # Filtreye uymayan ilanları da bir daha kontrol edilmemesi için kaydet (notified=True, matched_keyword='')
                         self.storage.save_listing(
                             listing_id=item.id,
                             url=item.url,
@@ -270,8 +296,7 @@ class JobScheduler:
                         notified=sent_ok,
                         matched_keyword=eval_res.matched_include or "",
                     )
-                    if not sent_ok:
-                        self.storage.mark_listing_notified(item.id, False, send_err)
+                    self.storage.record_notification_result(item.id, sent_ok, send_err)
 
                     # Arayüz callback'ini bilgilendir
                     if self.on_new_listing_callback:

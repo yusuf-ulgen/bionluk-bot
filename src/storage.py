@@ -62,9 +62,19 @@ class Storage:
                     first_seen_at TEXT NOT NULL,
                     notified INTEGER DEFAULT 0,
                     notification_error TEXT,
-                    matched_keyword TEXT
+                    matched_keyword TEXT,
+                    notification_retries INTEGER DEFAULT 0,
+                    last_notification_attempt TEXT
                 )
             """)
+
+            # Mevcut veritabanı varsa eksik sütunları güvenle ekle
+            cursor.execute("PRAGMA table_info(listings)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "notification_retries" not in columns:
+                cursor.execute("ALTER TABLE listings ADD COLUMN notification_retries INTEGER DEFAULT 0")
+            if "last_notification_attempt" not in columns:
+                cursor.execute("ALTER TABLE listings ADD COLUMN last_notification_attempt TEXT")
 
             # Tarama geçmişi tablosu
             cursor.execute("""
@@ -144,17 +154,72 @@ class Storage:
 
     def mark_listing_notified(self, listing_id: str, success: bool, error_msg: str = ""):
         """Bildirim gönderim sonucunu kaydeder."""
+        self.record_notification_result(listing_id, success, error_msg)
+
+    def record_notification_result(self, listing_id: str, success: bool, error_msg: str = ""):
+        """Bildirim gönderim durumunu, deneme sayısını ve zaman damgasını kaydeder."""
+        now_str = datetime.datetime.now().isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if success:
+                cursor.execute(
+                    """
+                    UPDATE listings 
+                    SET notified = 1, notification_error = '', last_notification_attempt = ?
+                    WHERE listing_id = ?
+                    """,
+                    (now_str, listing_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE listings 
+                    SET notified = 0, notification_error = ?,
+                        notification_retries = notification_retries + 1,
+                        last_notification_attempt = ?
+                    WHERE listing_id = ?
+                    """,
+                    (error_msg, now_str, listing_id),
+                )
+            conn.commit()
+
+    def should_retry_notification(self, listing_id: str, max_retries: int = 3) -> bool:
+        """
+        Bildirimi başarısız olmuş bir ilan için tekrar deneme yapılıp yapılmayacağını belirler.
+        Sadece filtre eşleşmesi olan (matched_keyword != '') ve bildirilmemiş (notified == 0)
+        ilanlar deneme sınırına kadar tekrar denenir.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                UPDATE listings 
-                SET notified = ?, notification_error = ?
+                SELECT notified, notification_retries, matched_keyword
+                FROM listings
                 WHERE listing_id = ?
                 """,
-                (1 if success else 0, error_msg if not success else "", listing_id),
+                (listing_id,),
             )
-            conn.commit()
+            row = cursor.fetchone()
+            if not row:
+                return False
+            is_notified = bool(row["notified"])
+            retries = int(row["notification_retries"] or 0)
+            matched_kw = row["matched_keyword"] or ""
+
+            # Başlangıç kaydı veya filtrelenmiş ilanlar tekrar denenmez
+            if is_notified or not matched_kw or matched_kw == "Başlangıç Kaydı":
+                return False
+
+            return retries < max_retries
+
+    def get_matched_keyword(self, listing_id: str) -> str:
+        """İlanın eşleştiği anahtar kelimeyi döner."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT matched_keyword FROM listings WHERE listing_id = ?", (listing_id,))
+            row = cursor.fetchone()
+            return row["matched_keyword"] if row and row["matched_keyword"] else ""
+
 
     def is_baseline_established(self) -> bool:
         """İlk başarılı tarama kaydı yapılmış mı kontrol eder."""
