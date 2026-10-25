@@ -61,6 +61,7 @@ class JobScheduler:
         self.status = SchedulerStatus(
             last_successful_scan_time=self.storage.get_last_successful_scan()
         )
+        self._is_first_scan_of_session = True
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -135,7 +136,8 @@ class JobScheduler:
                     break
 
                 self.status.seconds_until_next_scan = remaining
-                self.status.status_message = f"Sonraki taramaya: {remaining} sn"
+                if not self.status.status_message or "Sonraki taramaya" in self.status.status_message:
+                    self.status.status_message = "Bionluk Bağlantısı: Aktif (Oturum Açık)"
                 self._notify_status()
 
                 # 1.0 saniyelik adımlarla bekle, stop sinyalinde anında çık
@@ -221,52 +223,19 @@ class JobScheduler:
             new_items_count = 0
 
             if is_first_baseline:
-                # Boş liste veya yüklenmemiş sayfa ile başlangıç kaydı oluşturulmamalı (bildirim yağmurunu önleme)
+                # Boş liste veya yüklenmemiş sayfa ile başlangıç kaydı oluşturulmamalı
                 if len(listings) == 0:
                     logger.warning("İlk taramada sayfada ilan tespit edilemedi; başlangıç kaydı geçerli bir sayfa okumasına kadar ertelendi.")
-                    self.status.status_message = "İlk tarama: İlan tespit edilemedi (Başlangıç kaydı bekleniyor)"
+                    self.status.status_message = "İlk tarama: İlan tespit edilemedi"
                     self.storage.log_scan(success=True, items_found=0, new_items_count=0)
                     return
 
-                logger.info(f"İlk başarılı tarama: {len(listings)} ilan başlangıç kaydı (baseline) olarak alınıyor.")
-                for item in listings:
-                    eval_res = self.filter_engine.evaluate(item.title, item.description)
-                    # Baseline ilanlarını bildirilmiş gibi kaydet (eski ilan bildirim yağmurunu önle)
-                    self.storage.save_listing(
-                        listing_id=item.id,
-                        url=item.url,
-                        title=item.title,
-                        description=item.description,
-                        budget=item.budget,
-                        category=item.category,
-                        notified=True,
-                        matched_keyword=eval_res.matched_include or "Başlangıç Kaydı",
-                    )
-                self.storage.set_baseline_established()
-                self.status.status_message = f"İlk tarama tamamlandı ({len(listings)} ilan başlangıç kaydı alındı)"
-            else:
-                # Normal tarama döngüsü: Yeni ilanları değerlendir
-                for item in listings:
-                    if self.storage.is_listing_seen(item.id):
-                        # Bildirimi daha önce başarısız olmuş eşleşen ilanlar için kontrollü tekrar deneme (max 3)
-                        if self.storage.should_retry_notification(item.id, max_retries=3):
-                            logger.info(f"Teslim edilemeyen ilan için bildirim tekrar deneniyor: {item.title}")
-                            budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
-                            matched_kw = self.storage.get_matched_keyword(item.id) or "Filtre Eşleşmesi"
-                            msg = f"{item.title}{budget_info}\nEşleşen: {matched_kw}"
-                            sent_ok, send_err = self.notifier.send_notification(
-                                title="Yeni Bionluk İlanı!",
-                                message=msg,
-                                url=item.url,
-                            )
-                            self.storage.record_notification_result(item.id, sent_ok, send_err)
-                        continue
+                logger.info(f"İlk başlangıç kaydı: {len(listings)} ilan bulundu. Yalnızca en güncel 1 tanesi için test bildirimi gönderilecek.")
+                first_notif_sent = False
 
-                    # İlan daha önce görülmemiş
+                for item in listings:
                     eval_res = self.filter_engine.evaluate(item.title, item.description)
                     if not eval_res.is_match:
-                        logger.debug(f"İlan filtreye takıldı: {item.title} ({eval_res.reason})")
-                        # Filtreye uymayan ilanları da bir daha kontrol edilmemesi için kaydet (notified=True, matched_keyword='')
                         self.storage.save_listing(
                             listing_id=item.id,
                             url=item.url,
@@ -279,41 +248,155 @@ class JobScheduler:
                         )
                         continue
 
-                    # EŞLEŞEN YENİ İLAN!
-                    new_items_count += 1
-                    logger.info(f"Yeni eşleşen ilan bulundu: {item.title}")
+                    # Yalnızca en güncel 1 ilanı test amaçlı bildir
+                    if not first_notif_sent:
+                        first_notif_sent = True
+                        new_items_count += 1
+                        budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
+                        msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
+                        sent_ok, send_err = self.notifier.send_notification(
+                            title="Bionluk Takipçisi Aktif (Son İlan)",
+                            message=msg,
+                            url=item.url,
+                        )
+                        self.storage.save_listing(
+                            listing_id=item.id,
+                            url=item.url,
+                            title=item.title,
+                            description=item.description,
+                            budget=item.budget,
+                            category=item.category,
+                            notified=True,
+                            matched_keyword=eval_res.matched_include or "Başlangıç İlanı",
+                        )
+                    else:
+                        # Kalan diğer eski ilanları sessizce kaydet (bildirim yağmurunu önle)
+                        self.storage.save_listing(
+                            listing_id=item.id,
+                            url=item.url,
+                            title=item.title,
+                            description=item.description,
+                            budget=item.budget,
+                            category=item.category,
+                            notified=True,
+                            matched_keyword=eval_res.matched_include or "Başlangıç Kaydı",
+                        )
 
-                    # Bildirim gönder
-                    budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
-                    msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
-                    
-                    sent_ok, send_err = self.notifier.send_notification(
-                        title="Yeni Bionluk İlanı!",
-                        message=msg,
-                        url=item.url,
-                    )
-
-                    # Veritabanına kaydet
-                    self.storage.save_listing(
-                        listing_id=item.id,
-                        url=item.url,
-                        title=item.title,
-                        description=item.description,
-                        budget=item.budget,
-                        category=item.category,
-                        notified=sent_ok,
-                        matched_keyword=eval_res.matched_include or "",
-                    )
-                    self.storage.record_notification_result(item.id, sent_ok, send_err)
-
-                    # Arayüz callback'ini bilgilendir
                     if self.on_new_listing_callback:
                         try:
                             self.on_new_listing_callback(item, eval_res.matched_include or "")
                         except Exception as cb_err:
-                            logger.error(f"Yeni ilan bildirim arayüz callback hatası: {cb_err}")
+                            logger.error(f"Başlangıç ilan arayüz callback hatası: {cb_err}")
 
-                self.status.status_message = f"Tarama tamamlandı ({new_items_count} yeni eşleşme)"
+                self.storage.set_baseline_established()
+                self._is_first_scan_of_session = False
+                self.status.status_message = "Bionluk Bağlantısı: Aktif (Oturum Açık)"
+            else:
+                # Normal tarama döngüsü
+                new_matching_items = []
+                for item in listings:
+                    if not self.storage.is_listing_seen(item.id):
+                        eval_res = self.filter_engine.evaluate(item.title, item.description)
+                        if eval_res.is_match:
+                            new_matching_items.append((item, eval_res))
+                        else:
+                            self.storage.save_listing(
+                                listing_id=item.id,
+                                url=item.url,
+                                title=item.title,
+                                description=item.description,
+                                budget=item.budget,
+                                category=item.category,
+                                notified=True,
+                                matched_keyword="",
+                            )
+                    else:
+                        # Daha önce görülmüş, bildirimi başarısız olmuş ilanlar için tekrar deneme (max 3)
+                        if self.storage.should_retry_notification(item.id, max_retries=3):
+                            logger.info(f"Teslim edilemeyen ilan için bildirim tekrar deneniyor: {item.title}")
+                            budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
+                            matched_kw = self.storage.get_matched_keyword(item.id) or "Filtre Eşleşmesi"
+                            msg = f"{item.title}{budget_info}\nEşleşen: {matched_kw}"
+                            sent_ok, send_err = self.notifier.send_notification(
+                                title="Yeni Bionluk İlanı!",
+                                message=msg,
+                                url=item.url,
+                            )
+                            self.storage.record_notification_result(item.id, sent_ok, send_err)
+
+                # Eğer oturum başlangıcında birden fazla yeni ilan varsa (çalıştırmadan önceki ilanlar):
+                # Yalnızca en yeni 1 tanesini bildir, diğerlerini sessizce kaydet
+                if self._is_first_scan_of_session and len(new_matching_items) > 1:
+                    logger.info(f"Oturum başlangıcında {len(new_matching_items)} ilan bulundu. Yalnızca en yeni 1 ilan için bildirim gönderiliyor.")
+                    for idx, (item, eval_res) in enumerate(new_matching_items):
+                        if idx == 0:
+                            new_items_count += 1
+                            budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
+                            msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
+                            sent_ok, send_err = self.notifier.send_notification(
+                                title="Bionluk Takipçisi Aktif (Son İlan)",
+                                message=msg,
+                                url=item.url,
+                            )
+                            self.storage.save_listing(
+                                listing_id=item.id,
+                                url=item.url,
+                                title=item.title,
+                                description=item.description,
+                                budget=item.budget,
+                                category=item.category,
+                                notified=True,
+                                matched_keyword=eval_res.matched_include or "",
+                            )
+                        else:
+                            self.storage.save_listing(
+                                listing_id=item.id,
+                                url=item.url,
+                                title=item.title,
+                                description=item.description,
+                                budget=item.budget,
+                                category=item.category,
+                                notified=True,
+                                matched_keyword=eval_res.matched_include or "",
+                            )
+
+                        if self.on_new_listing_callback:
+                            try:
+                                self.on_new_listing_callback(item, eval_res.matched_include or "")
+                            except Exception as cb_err:
+                                logger.error(f"Yeni ilan callback hatası: {cb_err}")
+                else:
+                    # Normal çalışma (veya tek yeni ilan): HER yeni ilan için sınırsız bildirim gönder!
+                    for item, eval_res in new_matching_items:
+                        new_items_count += 1
+                        logger.info(f"Yeni eşleşen ilan bulundu: {item.title}")
+                        budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
+                        msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
+                        sent_ok, send_err = self.notifier.send_notification(
+                            title="Yeni Bionluk İlanı!",
+                            message=msg,
+                            url=item.url,
+                        )
+                        self.storage.save_listing(
+                            listing_id=item.id,
+                            url=item.url,
+                            title=item.title,
+                            description=item.description,
+                            budget=item.budget,
+                            category=item.category,
+                            notified=sent_ok,
+                            matched_keyword=eval_res.matched_include or "",
+                        )
+                        self.storage.record_notification_result(item.id, sent_ok, send_err)
+
+                        if self.on_new_listing_callback:
+                            try:
+                                self.on_new_listing_callback(item, eval_res.matched_include or "")
+                            except Exception as cb_err:
+                                logger.error(f"Yeni ilan bildirim callback hatası: {cb_err}")
+
+                self._is_first_scan_of_session = False
+                self.status.status_message = "Bionluk Bağlantısı: Aktif (Oturum Açık)"
 
             self.storage.log_scan(
                 success=True,

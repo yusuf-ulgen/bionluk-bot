@@ -46,8 +46,9 @@ def test_scheduler_baseline_no_notification_storm(tmp_path: Path):
     assert storage.is_baseline_established() is True
     assert storage.is_listing_seen("1") is True
     assert storage.is_listing_seen("2") is True
-    # Bildirim listesi BOŞ olmalı çünkü ilk taramada bildirim yağmuru engellendi
-    assert len(notifier.sent_notifications) == 0
+    # Bildirim listesi: Eski ilanlardan yalnızca en güncel 1 tanesi bildirilmeli (bildirim yağmuru engellendi)
+    assert len(notifier.sent_notifications) == 1
+    assert "Python Bot Yazımı" in notifier.sent_notifications[0]["message"]
 
     # 2. Tarama: Yeni 1 ilan ekleniyor
     item3 = Listing(id="3", title="Yeni Python Projesi", url="https://bionluk.com/3")
@@ -55,14 +56,14 @@ def test_scheduler_baseline_no_notification_storm(tmp_path: Path):
 
     scheduler._execute_scan()
 
-    # Şimdi sadece yeni ilan (item3) için 1 adet bildirim gitmiş olmalı
-    assert len(notifier.sent_notifications) == 1
-    assert "Yeni Python Projesi" in notifier.sent_notifications[0]["message"]
+    # Şimdi toplam 2 bildirim (1 başlangıç son ilan + 1 yeni ilan)
+    assert len(notifier.sent_notifications) == 2
+    assert "Yeni Python Projesi" in notifier.sent_notifications[1]["message"]
     assert storage.is_listing_seen("3") is True
 
     # 3. Tarama: Yeni ilan yok, tekrar bildirim gitmemeli (deduplication)
     scheduler._execute_scan()
-    assert len(notifier.sent_notifications) == 1
+    assert len(notifier.sent_notifications) == 2
 
 
 def test_scheduler_handles_adapter_error(tmp_path: Path):
@@ -146,16 +147,16 @@ def test_scheduler_failed_first_scan_does_not_establish_baseline(tmp_path: Path)
     # 2. İnternet düzeldi, başarılı tarama
     adapter.should_fail = False
     scheduler._execute_scan()
-    # Şimdi baseline kurulmalı ve eski ilan için bildirim GÖNDERİLMEMELİ
+    # Şimdi baseline kurulmalı ve eski ilanlardan sadece en güncel 1 tanesi test için bildirilmeli
     assert storage.is_baseline_established() is True
     assert storage.is_listing_seen("old-1") is True
-    assert len(notifier.sent_notifications) == 0
+    assert len(notifier.sent_notifications) == 1
 
     # 3. Sonradan yeni ilan gelince bildirim gitmeli
     adapter.add_listing(Listing(id="new-1", title="Yeni İlan", url="https://bionluk.com/new"))
     scheduler._execute_scan()
-    assert len(notifier.sent_notifications) == 1
-    assert "Yeni İlan" in notifier.sent_notifications[0]["message"]
+    assert len(notifier.sent_notifications) == 2
+    assert "Yeni İlan" in notifier.sent_notifications[1]["message"]
 
 
 def test_filter_change_does_not_re_notify_old_listings(tmp_path: Path):
@@ -168,10 +169,10 @@ def test_filter_change_does_not_re_notify_old_listings(tmp_path: Path):
     adapter = MockScraperAdapter()
     scheduler = JobScheduler(cfg_mgr, storage, filter_engine, notifier, adapter)
 
-    # Baseline oluştur
+    # Baseline oluştur (eski ilanlardan yalnızca en güncel 1'i test bildirimi olarak verilir)
     adapter.add_listing(Listing(id="1", title="Python ve Django İşi", url="https://bionluk.com/1"))
     scheduler._execute_scan()
-    assert len(notifier.sent_notifications) == 0
+    assert len(notifier.sent_notifications) == 1
 
     # Filtreyi değiştir (django ekle)
     filter_engine.update_rules(["django"], [])
@@ -179,7 +180,7 @@ def test_filter_change_does_not_re_notify_old_listings(tmp_path: Path):
 
     # Tekrar tara: İlan 1 zaten görüldüğü için ASLA tekrar bildirilmez
     scheduler._execute_scan()
-    assert len(notifier.sent_notifications) == 0
+    assert len(notifier.sent_notifications) == 1
 
 
 def test_notification_failure_and_controlled_retry(tmp_path: Path):
@@ -310,5 +311,40 @@ def test_concurrent_scans_prevented(tmp_path: Path):
 
     # Eşzamanlı çalışan tarama sayısı hiçbir zaman 1'i geçmemeli
     assert max_concurrent == 1
+
+
+def test_session_first_scan_notifies_only_one_then_unlimited(tmp_path: Path):
+    """Oturum başlangıcında biriken eski ilanlardan sadece 1 bildirim gider; çalışma esnasında sınırsız bildirim gider."""
+    cfg_mgr = ConfigManager(tmp_path / "config.json")
+    storage = Storage(tmp_path / "test.db")
+    storage.set_baseline_established()  # Veritabanında daha önce baseline kurulmuş
+    filter_engine = FilterEngine(included_keywords=["python"])
+    notifier = DummyNotifier()
+
+    # Kullanıcı uygulamayı açtığında 5 adet eski Python ilanı birikmiş durumda
+    old_listings = [
+        Listing(id=f"old-{i}", title=f"Python İşi {i}", url=f"https://bionluk.com/{i}")
+        for i in range(1, 6)
+    ]
+    adapter = MockScraperAdapter(old_listings)
+    scheduler = JobScheduler(cfg_mgr, storage, filter_engine, notifier, adapter)
+
+    # 1. Oturumun ilk taraması: 5 ilan var ama yalnızca 1 tanesi (en yeni olan) bildirilmeli
+    scheduler._execute_scan()
+    assert len(notifier.sent_notifications) == 1
+    assert "Python İşi 1" in notifier.sent_notifications[0]["message"]
+    # Diğer 4 ilan da veritabanına görülmüş olarak kaydedilmiş olmalı
+    for i in range(1, 6):
+        assert storage.is_listing_seen(f"old-{i}") is True
+
+    # 2. Uygulama çalışırken 3 adet yeni ilan geldi: 3'ü de sınırsız olarak bildirilmeli!
+    adapter.add_listing(Listing(id="live-1", title="Python Bot", url="https://bionluk.com/l1"))
+    adapter.add_listing(Listing(id="live-2", title="Python Veri Çekme", url="https://bionluk.com/l2"))
+    adapter.add_listing(Listing(id="live-3", title="Python API", url="https://bionluk.com/l3"))
+
+    scheduler._execute_scan()
+    # 1 başlangıç bildirimi + 3 canlı yeni ilan = 4 bildirim
+    assert len(notifier.sent_notifications) == 4
+
 
 

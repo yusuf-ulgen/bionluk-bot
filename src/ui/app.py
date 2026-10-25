@@ -4,6 +4,7 @@ Bionluk İlan Takipçisi Tkinter Masaüstü Kullanıcı Arayüzü (GUI).
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import queue
 import threading
@@ -26,6 +27,30 @@ from ..storage import Storage, StoredListing
 logger = logging.getLogger("bionluk_bot.ui")
 
 
+def hide_console():
+    """Windows CMD / PowerShell konsol penceresini gizler."""
+    try:
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if not hwnd:
+            hwnd = ctypes.windll.user32.FindWindowW(None, "Bionluk Ilan Takipcisi")
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception as e:
+        logger.debug(f"Konsol gizleme hatası: {e}")
+
+
+def show_console():
+    """Windows CMD / PowerShell konsol penceresini geri gösterir."""
+    try:
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if not hwnd:
+            hwnd = ctypes.windll.user32.FindWindowW(None, "Bionluk Ilan Takipcisi")
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 5)
+    except Exception as e:
+        logger.debug(f"Konsol gösterme hatası: {e}")
+
+
 class BionlukBotApp:
     def __init__(
         self,
@@ -43,8 +68,8 @@ class BionlukBotApp:
 
         self.root = tk.Tk()
         self.root.title("Bionluk İlan Takipçisi")
-        self.root.geometry("980x740")
-        self.root.minsize(820, 600)
+        self.root.geometry("1020x760")
+        self.root.minsize(880, 640)
 
         # UI güncelleme kuyruğu (Thread safety)
         self.msg_queue: queue.Queue = queue.Queue()
@@ -74,6 +99,12 @@ class BionlukBotApp:
         # Pencere kapatma olayı
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
+    def _set_btn_state(self, btn: tk.Button, enabled: bool, normal_bg: str, normal_fg: str = "#ffffff"):
+        if enabled:
+            btn.configure(state=tk.NORMAL, bg=normal_bg, fg=normal_fg, cursor="hand2")
+        else:
+            btn.configure(state=tk.DISABLED, bg="#f1f5f9", fg="#94a3b8", cursor="arrow")
+
     def _apply_styles(self):
         self.style = ttk.Style()
         try:
@@ -81,16 +112,17 @@ class BionlukBotApp:
         except Exception:
             pass
 
-        # Renk paleti
-        self.color_bg = "#f5f6f8"
-        self.color_card = "#ffffff"
-        self.color_primary = "#00a885"      # Bionluk Yeşili
+        # Modern renk paleti
+        self.color_bg = "#f8fafc"           # Yumuşak Slate-50 arka plan
+        self.color_card = "#ffffff"         # Beyaz kartlar
+        self.color_primary = "#00a885"      # Bionluk Zümrüt Yeşili
         self.color_primary_hover = "#008f71"
-        self.color_danger = "#e53e3e"
-        self.color_warning = "#dd6b20"
-        self.color_text = "#2d3748"
-        self.color_muted = "#718096"
-        self.color_border = "#e2e8f0"
+        self.color_danger = "#ef4444"       # Modern Mercan Kırmızısı
+        self.color_indigo = "#6366f1"       # İndigo Vurgu
+        self.color_blue = "#0284c7"         # Mavi Vurgu
+        self.color_text = "#0f172a"         # Slate-900
+        self.color_text_muted = "#64748b"   # Slate-500
+        self.color_border = "#e2e8f0"       # İnce kenarlık rengi
 
         self.root.configure(bg=self.color_bg)
 
@@ -98,155 +130,369 @@ class BionlukBotApp:
         self.style.configure("Card.TFrame", background=self.color_card, relief="flat")
         self.style.configure("TLabel", background=self.color_bg, foreground=self.color_text)
         self.style.configure("Card.TLabel", background=self.color_card, foreground=self.color_text)
-        self.style.configure("Header.TLabel", font=("Segoe UI", 13, "bold"), background=self.color_card, foreground="#1a202c")
-        self.style.configure("SubHeader.TLabel", font=("Segoe UI", 10, "bold"), background=self.color_card, foreground="#4a5568")
+        self.style.configure("Header.TLabel", font=("Segoe UI", 13, "bold"), background=self.color_card, foreground="#0f172a")
+        self.style.configure("SubHeader.TLabel", font=("Segoe UI", 10, "bold"), background=self.color_card, foreground="#1e293b")
 
-        # Buton stilleri
-        self.style.configure("Primary.TButton", font=("Segoe UI", 9, "bold"), background=self.color_primary, foreground="#ffffff")
-        self.style.map("Primary.TButton", background=[("active", self.color_primary_hover)])
+        # Sekme (Notebook) Stili
+        self.style.configure("TNotebook", background=self.color_bg, borderwidth=0)
+        self.style.configure("TNotebook.Tab", font=("Segoe UI", 9, "bold"), padding=(16, 7), background="#f1f5f9", foreground="#475569")
+        self.style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#00a885")])
 
-        self.style.configure("Danger.TButton", font=("Segoe UI", 9, "bold"), background=self.color_danger, foreground="#ffffff")
-        self.style.map("Danger.TButton", background=[("active", "#c53030")])
-
-        # Treeview stili
+        # Treeview Stili
         self.style.configure(
             "Treeview",
             background="#ffffff",
             fieldbackground="#ffffff",
-            foreground="#2d3748",
-            rowheight=26,
+            foreground="#1e293b",
+            rowheight=32,
             font=("Segoe UI", 9),
+            borderwidth=0,
         )
-        self.style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"), background="#edf2f7", foreground="#2d3748")
+        self.style.configure(
+            "Treeview.Heading",
+            font=("Segoe UI", 9, "bold"),
+            background="#f1f5f9",
+            foreground="#1e293b",
+            relief="flat",
+            padding=(8, 8),
+        )
+        self.style.map("Treeview", background=[("selected", "#e0f2fe")], foreground=[("selected", "#0369a1")])
 
     def _build_ui(self):
         # Ana Konteyner
-        main_frame = ttk.Frame(self.root, padding=12)
+        main_frame = tk.Frame(self.root, bg=self.color_bg, padx=14, pady=12)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # 1. ÜST BİLGİ VE DURUM KARTI
-        status_card = ttk.Frame(main_frame, style="Card.TFrame", padding=12)
+        status_card = tk.Frame(
+            main_frame,
+            bg=self.color_card,
+            highlightbackground=self.color_border,
+            highlightthickness=1,
+            padx=16,
+            pady=12,
+        )
         status_card.pack(fill=tk.X, pady=(0, 10))
 
         # Başlık ve Rozet
-        top_row = ttk.Frame(status_card, style="Card.TFrame")
+        top_row = tk.Frame(status_card, bg=self.color_card)
         top_row.pack(fill=tk.X)
 
-        ttk.Label(top_row, text="Bionluk İlan & Alıcı İstekleri Takipçisi", style="Header.TLabel").pack(side=tk.LEFT)
+        tk.Label(
+            top_row,
+            text="⚡  Bionluk İlan & Alıcı İstekleri Takipçisi",
+            font=("Segoe UI", 13, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        ).pack(side=tk.LEFT)
 
         self.badge_lbl = tk.Label(
             top_row,
             text="DURDURULDU",
             font=("Segoe UI", 9, "bold"),
-            bg="#edf2f7",
-            fg="#718096",
-            padx=10,
-            pady=3,
+            bg="#f1f5f9",
+            fg="#64748b",
+            padx=12,
+            pady=4,
             relief="flat",
         )
         self.badge_lbl.pack(side=tk.RIGHT)
 
-        # Durum Sayaçları ve Bilgileri
-        info_row = ttk.Frame(status_card, style="Card.TFrame")
-        info_row.pack(fill=tk.X, pady=(8, 0))
+        # Durum Sayaçları ve Bilgileri (Ayrıştırılmış, mükerrer süre bilgisi içermez)
+        info_row = tk.Frame(status_card, bg=self.color_card)
+        info_row.pack(fill=tk.X, pady=(10, 0))
 
-        self.lbl_status_msg = ttk.Label(info_row, text="Durum: Hazır", style="Card.TLabel", font=("Segoe UI", 9, "bold"))
-        self.lbl_status_msg.pack(side=tk.LEFT, padx=(0, 20))
+        self.lbl_status_msg = tk.Label(
+            info_row,
+            text="Durum: Beklemede",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.color_card,
+            fg=self.color_primary,
+        )
+        self.lbl_status_msg.pack(side=tk.LEFT, padx=(0, 24))
 
-        self.lbl_next_countdown = ttk.Label(info_row, text="Kalan Süre: --", style="Card.TLabel")
-        self.lbl_next_countdown.pack(side=tk.LEFT, padx=(0, 20))
+        self.lbl_next_countdown = tk.Label(
+            info_row,
+            text="Kalan Süre: --",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        )
+        self.lbl_next_countdown.pack(side=tk.LEFT, padx=(0, 24))
 
-        self.lbl_last_scan = ttk.Label(info_row, text="Son Tarama: Henüz yapılmadı", style="Card.TLabel")
-        self.lbl_last_scan.pack(side=tk.LEFT, padx=(0, 20))
+        self.lbl_last_scan = tk.Label(
+            info_row,
+            text="Son Tarama: Henüz yapılmadı",
+            font=("Segoe UI", 9),
+            bg=self.color_card,
+            fg=self.color_text_muted,
+        )
+        self.lbl_last_scan.pack(side=tk.LEFT, padx=(0, 24))
 
-        self.lbl_last_success = ttk.Label(info_row, text="Son Başarılı: Henüz yok", style="Card.TLabel")
+        self.lbl_last_success = tk.Label(
+            info_row,
+            text="Son Başarılı: Henüz yok",
+            font=("Segoe UI", 9),
+            bg=self.color_card,
+            fg=self.color_text_muted,
+        )
         self.lbl_last_success.pack(side=tk.LEFT)
 
         # 2. SEKMELER (KONTROLLER VE AYARLAR)
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.X, pady=(0, 10))
 
-        tab_controls = ttk.Frame(notebook, padding=10)
-        tab_filters = ttk.Frame(notebook, padding=10)
-        tab_settings = ttk.Frame(notebook, padding=10)
+        tab_controls = tk.Frame(notebook, bg=self.color_card, padx=12, pady=12)
+        tab_filters = tk.Frame(notebook, bg=self.color_card, padx=14, pady=12)
+        tab_settings = tk.Frame(notebook, bg=self.color_card, padx=14, pady=12)
 
         notebook.add(tab_controls, text="  Ana Kontroller  ")
         notebook.add(tab_filters, text="  Filtreler (Dahil / Hariç)  ")
         notebook.add(tab_settings, text="  Tarama & Sistem Ayarları  ")
 
-        # --- SEKME 1: ANA KONTROLLER ---
-        ctrl_row = ttk.Frame(tab_controls)
-        ctrl_row.pack(fill=tk.X, pady=4)
+        # --- SEKME 1: ANA KONTROLLER (RENKLİ & MODERN BUTONLAR) ---
+        ctrl_row = tk.Frame(tab_controls, bg=self.color_card)
+        ctrl_row.pack(fill=tk.X, pady=2)
 
-        self.btn_start = ttk.Button(ctrl_row, text="▶ Taramayı Başlat", style="Primary.TButton", command=self._start_scanning)
+        self.btn_start = tk.Button(
+            ctrl_row,
+            text="▶  Taramayı Başlat",
+            font=("Segoe UI", 9, "bold"),
+            bg="#00a885",
+            fg="#ffffff",
+            activebackground="#008f71",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=14,
+            pady=7,
+            cursor="hand2",
+            command=self._start_scanning,
+        )
         self.btn_start.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_stop = ttk.Button(ctrl_row, text="⏹ Durdur", style="Danger.TButton", command=self._stop_scanning, state=tk.DISABLED)
-        self.btn_stop.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_stop = tk.Button(
+            ctrl_row,
+            text="⏹  Durdur",
+            font=("Segoe UI", 9, "bold"),
+            bg="#f1f5f9",
+            fg="#94a3b8",
+            activebackground="#fee2e2",
+            activeforeground="#dc2626",
+            relief="flat",
+            padx=14,
+            pady=7,
+            cursor="arrow",
+            state=tk.DISABLED,
+            command=self._stop_scanning,
+        )
+        self.btn_stop.pack(side=tk.LEFT, padx=(0, 12))
 
-        self.btn_scan_now = ttk.Button(ctrl_row, text="⚡ Şimdi Tara", command=self._scan_now)
-        self.btn_scan_now.pack(side=tk.LEFT, padx=(0, 16))
+        self.btn_scan_now = tk.Button(
+            ctrl_row,
+            text="⚡  Şimdi Tara",
+            font=("Segoe UI", 9, "bold"),
+            bg="#6366f1",
+            fg="#ffffff",
+            activebackground="#4f46e5",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=7,
+            cursor="hand2",
+            command=self._scan_now,
+        )
+        self.btn_scan_now.pack(side=tk.LEFT, padx=(0, 12))
 
         # Giriş yap ve Test Butonları
-        self.btn_login = ttk.Button(ctrl_row, text="🔑 Bionluk'a Giriş Yap (Tarayıcı Aç)", command=self._open_login_browser)
+        self.btn_login = tk.Button(
+            ctrl_row,
+            text="🔑  Bionluk Girişi (Chrome)",
+            font=("Segoe UI", 9, "bold"),
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=7,
+            cursor="hand2",
+            command=self._open_login_browser,
+        )
         self.btn_login.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_test_notif = ttk.Button(ctrl_row, text="🔔 Test Bildirimi Gönder", command=self._send_test_notification)
+        self.btn_test_notif = tk.Button(
+            ctrl_row,
+            text="🔔  Test Bildirimi Gönder",
+            font=("Segoe UI", 9),
+            bg="#f1f5f9",
+            fg="#334155",
+            activebackground="#e2e8f0",
+            activeforeground="#1e293b",
+            relief="flat",
+            padx=12,
+            pady=7,
+            cursor="hand2",
+            command=self._send_test_notification,
+        )
         self.btn_test_notif.pack(side=tk.LEFT)
 
         # --- SEKME 2: FİLTRELER ---
-        filters_grid = ttk.Frame(tab_filters)
+        filters_grid = tk.Frame(tab_filters, bg=self.color_card)
         filters_grid.pack(fill=tk.X)
 
         # Dahil Kelimeler
-        ttk.Label(filters_grid, text="Dahil Edilecek Kelimeler (En az biri eşleşmeli, boşsa hepsi kabul edilir):", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 2))
+        tk.Label(
+            filters_grid,
+            text="Dahil Edilecek Kelimeler (En az biri eşleşmeli, boşsa hepsi kabul edilir):",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        ).grid(row=0, column=0, sticky="w", pady=(0, 2))
+
         self.ent_include = ttk.Entry(filters_grid, width=70)
         self.ent_include.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 6))
-        ttk.Label(filters_grid, text="Örn: python, flutter, web tasarım, logo, çeviri (Virgülle ayırın)", foreground=self.color_muted).grid(row=2, column=0, sticky="w", pady=(0, 8))
+
+        tk.Label(
+            filters_grid,
+            text="Örn: python, flutter, web tasarım, logo, çeviri (Virgülle ayırın)",
+            font=("Segoe UI", 8),
+            bg=self.color_card,
+            fg=self.color_text_muted,
+        ).grid(row=2, column=0, sticky="w", pady=(0, 8))
 
         # Hariç Kelimeler
-        ttk.Label(filters_grid, text="Hariç Tutulacak Kelimeler (Önceliklidir, eşleşen elenir):", font=("Segoe UI", 9, "bold")).grid(row=3, column=0, sticky="w", pady=(0, 2))
+        tk.Label(
+            filters_grid,
+            text="Hariç Tutulacak Kelimeler (Önceliklidir, eşleşen elenir):",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        ).grid(row=3, column=0, sticky="w", pady=(0, 2))
+
         self.ent_exclude = ttk.Entry(filters_grid, width=70)
         self.ent_exclude.grid(row=4, column=0, sticky="ew", padx=(0, 10), pady=(0, 6))
-        ttk.Label(filters_grid, text="Örn: stajyer, ücretsiz, ödev (Virgülle ayırın)", foreground=self.color_muted).grid(row=5, column=0, sticky="w", pady=(0, 8))
 
-        filter_btn_row = ttk.Frame(filters_grid)
+        tk.Label(
+            filters_grid,
+            text="Örn: stajyer, ücretsiz, ödev (Virgülle ayırın)",
+            font=("Segoe UI", 8),
+            bg=self.color_card,
+            fg=self.color_text_muted,
+        ).grid(row=5, column=0, sticky="w", pady=(0, 8))
+
+        filter_btn_row = tk.Frame(filters_grid, bg=self.color_card)
         filter_btn_row.grid(row=6, column=0, sticky="w")
 
-        ttk.Button(filter_btn_row, text="💾 Filtreleri Kaydet", style="Primary.TButton", command=self._save_filters).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(filter_btn_row, text="🔍 Eski İlanlarla Filtre Testi (Önizleme)", command=self._test_filters_preview).pack(side=tk.LEFT)
+        tk.Button(
+            filter_btn_row,
+            text="💾  Filtreleri Kaydet",
+            font=("Segoe UI", 9, "bold"),
+            bg="#00a885",
+            fg="#ffffff",
+            activebackground="#008f71",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=self._save_filters,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        tk.Button(
+            filter_btn_row,
+            text="🔍  Eski İlanlarla Filtre Testi (Önizleme)",
+            font=("Segoe UI", 9),
+            bg="#f1f5f9",
+            fg="#334155",
+            activebackground="#e2e8f0",
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=self._test_filters_preview,
+        ).pack(side=tk.LEFT)
 
         filters_grid.columnconfigure(0, weight=1)
 
         # --- SEKME 3: TARAMA VE SİSTEM AYARLARI ---
-        set_grid = ttk.Frame(tab_settings)
+        set_grid = tk.Frame(tab_settings, bg=self.color_card)
         set_grid.pack(fill=tk.X)
 
         # URL
-        ttk.Label(set_grid, text="Takip Edilen Bionluk URL Adresi:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 2))
-        url_row = ttk.Frame(set_grid)
+        tk.Label(
+            set_grid,
+            text="Takip Edilen Bionluk URL Adresi:",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        ).grid(row=0, column=0, sticky="w", pady=(0, 2))
+
+        url_row = tk.Frame(set_grid, bg=self.color_card)
         url_row.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+
         self.ent_url = ttk.Entry(url_row)
         self.ent_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        ttk.Button(url_row, text="URL'yi Kaydet", command=self._save_url).pack(side=tk.LEFT)
+
+        tk.Button(
+            url_row,
+            text="URL'yi Kaydet",
+            font=("Segoe UI", 9),
+            bg="#f1f5f9",
+            fg="#1e293b",
+            relief="flat",
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            command=self._save_url,
+        ).pack(side=tk.LEFT)
 
         # Tarama Aralığı
-        ttk.Label(set_grid, text="Tarama Aralığı (Saniye):", font=("Segoe UI", 9, "bold")).grid(row=2, column=0, sticky="w", pady=(0, 2))
-        interval_row = ttk.Frame(set_grid)
+        tk.Label(
+            set_grid,
+            text="Tarama Aralığı (Saniye):",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        ).grid(row=2, column=0, sticky="w", pady=(0, 2))
+
+        interval_row = tk.Frame(set_grid, bg=self.color_card)
         interval_row.grid(row=3, column=0, sticky="w", pady=(0, 8))
 
         self.ent_interval = ttk.Entry(interval_row, width=8)
         self.ent_interval.pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(interval_row, text="Aralığı Kaydet", command=self._save_interval).pack(side=tk.LEFT, padx=(0, 15))
+
+        tk.Button(
+            interval_row,
+            text="Aralığı Kaydet",
+            font=("Segoe UI", 9),
+            bg="#f1f5f9",
+            fg="#1e293b",
+            relief="flat",
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            command=self._save_interval,
+        ).pack(side=tk.LEFT, padx=(0, 15))
 
         # Hızlı Seçim Butonları
-        ttk.Label(interval_row, text="Hızlı Seçim:").pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(interval_row, text="Hızlı Seçim:", font=("Segoe UI", 9), bg=self.color_card, fg=self.color_text_muted).pack(side=tk.LEFT, padx=(0, 5))
         for sec in [15, 30, 60, 90, 120]:
-            ttk.Button(interval_row, text=f"{sec}s", width=4, command=lambda s=sec: self._quick_set_interval(s)).pack(side=tk.LEFT, padx=2)
+            tk.Button(
+                interval_row,
+                text=f"{sec}s",
+                font=("Segoe UI", 8),
+                bg="#f1f5f9",
+                fg="#334155",
+                relief="flat",
+                padx=6,
+                pady=2,
+                cursor="hand2",
+                command=lambda s=sec: self._quick_set_interval(s),
+            ).pack(side=tk.LEFT, padx=2)
 
         # Seçenekler (Ses ve Başlangıç)
-        options_row = ttk.Frame(set_grid)
-        options_row.grid(row=4, column=0, sticky="w", pady=(6, 0))
+        options_row = tk.Frame(set_grid, bg=self.color_card)
+        options_row.grid(row=4, column=0, sticky="w", pady=(8, 0))
 
         self.var_sound = tk.BooleanVar(value=self.config_mgr.config.sound_enabled)
         ttk.Checkbutton(options_row, text="Bildirimde Ses Çal", variable=self.var_sound, command=self._toggle_sound).pack(side=tk.LEFT, padx=(0, 25))
@@ -257,15 +503,41 @@ class BionlukBotApp:
         set_grid.columnconfigure(0, weight=1)
 
         # 3. İLANLAR LİSTESİ (TREEVIEW)
-        list_card = ttk.Frame(main_frame, style="Card.TFrame", padding=10)
+        list_card = tk.Frame(
+            main_frame,
+            bg=self.color_card,
+            highlightbackground=self.color_border,
+            highlightthickness=1,
+            padx=14,
+            pady=12,
+        )
         list_card.pack(fill=tk.BOTH, expand=True)
 
-        list_header = ttk.Frame(list_card, style="Card.TFrame")
-        list_header.pack(fill=tk.X, pady=(0, 6))
+        list_header = tk.Frame(list_card, bg=self.color_card)
+        list_header.pack(fill=tk.X, pady=(0, 8))
 
-        ttk.Label(list_header, text="Yakalanan İlanlar / Alıcı İstekleri", style="SubHeader.TLabel").pack(side=tk.LEFT)
+        tk.Label(
+            list_header,
+            text="📋  Yakalanan İlanlar / Alıcı İstekleri",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.color_card,
+            fg="#0f172a",
+        ).pack(side=tk.LEFT)
 
-        ttk.Button(list_header, text="🌐 Seçili İlanı Tarayıcıda Aç", command=self._open_selected_listing).pack(side=tk.RIGHT)
+        tk.Button(
+            list_header,
+            text="🌐  Seçili İlanı Tarayıcıda Aç",
+            font=("Segoe UI", 9, "bold"),
+            bg="#00a885",
+            fg="#ffffff",
+            activebackground="#008f71",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=5,
+            cursor="hand2",
+            command=self._open_selected_listing,
+        ).pack(side=tk.RIGHT)
 
         # Tablo
         columns = ("time", "title", "budget", "category", "match", "status")
@@ -278,12 +550,16 @@ class BionlukBotApp:
         self.tree.heading("match", text="Eşleşen Kelime")
         self.tree.heading("status", text="Bildirim Durumu")
 
-        self.tree.column("time", width=120, anchor="center")
+        self.tree.column("time", width=140, anchor="center")
         self.tree.column("title", width=380, anchor="w")
-        self.tree.column("budget", width=90, anchor="center")
+        self.tree.column("budget", width=100, anchor="center")
         self.tree.column("category", width=120, anchor="center")
         self.tree.column("match", width=110, anchor="center")
-        self.tree.column("status", width=100, anchor="center")
+        self.tree.column("status", width=110, anchor="center")
+
+        # Alternating row tag colors
+        self.tree.tag_configure("evenrow", background="#ffffff")
+        self.tree.tag_configure("oddrow", background="#f8fafc")
 
         scrollbar = ttk.Scrollbar(list_card, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -294,12 +570,13 @@ class BionlukBotApp:
         self.tree.bind("<Double-1>", lambda event: self._open_selected_listing())
 
         # Bilgi Notu
-        ttk.Label(
+        tk.Label(
             main_frame,
             text="* İlana çift tıklayarak veya butona basarak doğrudan Bionluk üzerinde açabilirsiniz.",
-            foreground=self.color_muted,
             font=("Segoe UI", 8),
-        ).pack(anchor="w", pady=(4, 0))
+            bg=self.color_bg,
+            fg=self.color_text_muted,
+        ).pack(anchor="w", pady=(6, 0))
 
     def _load_initial_data(self):
         """Ayarları ve mevcut veritabanı kayıtlarını arayüze doldurur."""
@@ -330,6 +607,9 @@ class BionlukBotApp:
         status_txt = "Bildirildi" if item.notified else ("Hata" if item.notification_error else "Bekliyor")
         time_display = item.first_seen_at[:19].replace("T", " ") if item.first_seen_at else "--"
 
+        row_count = len(self.tree.get_children())
+        tag = "evenrow" if row_count % 2 == 0 else "oddrow"
+
         self.tree.insert(
             "",
             0,
@@ -342,6 +622,7 @@ class BionlukBotApp:
                 item.matched_keyword or "Tümü",
                 status_txt,
             ),
+            tags=(tag,),
         )
 
     # --- BUTON VE AKSİYON İŞLEYİCİLERİ ---
@@ -355,14 +636,14 @@ class BionlukBotApp:
             )
             return
 
-        self.btn_start.configure(state=tk.DISABLED)
-        self.btn_stop.configure(state=tk.NORMAL)
+        self._set_btn_state(self.btn_start, False, "#00a885")
+        self._set_btn_state(self.btn_stop, True, "#ef4444")
         self.scheduler.start()
 
     def _stop_scanning(self):
         self.scheduler.stop()
-        self.btn_start.configure(state=tk.NORMAL)
-        self.btn_stop.configure(state=tk.DISABLED)
+        self._set_btn_state(self.btn_start, True, "#00a885")
+        self._set_btn_state(self.btn_stop, False, "#ef4444")
 
     def _scan_now(self):
         if self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked():
@@ -374,8 +655,8 @@ class BionlukBotApp:
             return
 
         self.scheduler.trigger_now()
-        self.btn_start.configure(state=tk.DISABLED)
-        self.btn_stop.configure(state=tk.NORMAL)
+        self._set_btn_state(self.btn_start, False, "#00a885")
+        self._set_btn_state(self.btn_stop, True, "#ef4444")
 
     def _open_login_browser(self):
         """Kullanıcının güvenle oturum açması için bağımsız Google Chrome açar."""
@@ -582,20 +863,30 @@ class BionlukBotApp:
 
     def _update_status_ui(self, status: SchedulerStatus):
         if status.is_running:
-            self.badge_lbl.configure(text="ÇALIŞIYOR", bg="#c6f6d5", fg="#22543d")
-            self.btn_start.configure(state=tk.DISABLED)
-            self.btn_stop.configure(state=tk.NORMAL)
+            if status.is_scanning_now:
+                self.badge_lbl.configure(text="TARANIYOR", bg="#e0f2fe", fg="#0369a1")
+                self.lbl_status_msg.configure(fg="#0284c7")
+            else:
+                self.badge_lbl.configure(text="ÇALIŞIYOR", bg="#ecfdf5", fg="#047857")
+                self.lbl_status_msg.configure(fg="#00a885")
+            self._set_btn_state(self.btn_start, False, "#00a885")
+            self._set_btn_state(self.btn_stop, True, "#ef4444")
         else:
-            self.badge_lbl.configure(text="DURDURULDU", bg="#edf2f7", fg="#718096")
-            self.btn_start.configure(state=tk.NORMAL)
-            self.btn_stop.configure(state=tk.DISABLED)
+            self.badge_lbl.configure(text="DURDURULDU", bg="#f1f5f9", fg="#64748b")
+            self.lbl_status_msg.configure(fg="#64748b")
+            self._set_btn_state(self.btn_start, True, "#00a885")
+            self._set_btn_state(self.btn_stop, False, "#ef4444")
 
         if status.requires_login:
-            self.badge_lbl.configure(text="GİRİŞ GEREKİYOR", bg="#fed7d7", fg="#9b2c2c")
+            self.badge_lbl.configure(text="GİRİŞ GEREKİYOR", bg="#fef2f2", fg="#991b1b")
+            self.lbl_status_msg.configure(fg="#dc2626")
 
-        self.lbl_status_msg.configure(text=f"Durum: {status.status_message}")
+        # Durum mesajı (Bağlantı ve oturum durumu)
+        status_text = status.status_message or "Hazır"
+        self.lbl_status_msg.configure(text=f"Durum: {status_text}")
 
-        if status.seconds_until_next_scan > 0:
+        # Kalan Süre
+        if status.seconds_until_next_scan > 0 and status.is_running:
             self.lbl_next_countdown.configure(text=f"Kalan Süre: {status.seconds_until_next_scan} sn")
         else:
             self.lbl_next_countdown.configure(text="Kalan Süre: --")
@@ -609,11 +900,14 @@ class BionlukBotApp:
     # --- SİSTEM TEPSİSİ VE KAPATMA ---
 
     def _create_tray_image(self):
-        """Sistem tepsisi için basit bir simge üretir."""
-        img = Image.new("RGB", (64, 64), color=(0, 168, 133))
+        """Sistem tepsisi için Bionluk zümrüt yeşili simge üretir."""
+        img = Image.new("RGBA", (64, 64), color=(0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        draw.ellipse((14, 14, 50, 50), fill=(255, 255, 255))
-        draw.ellipse((22, 22, 42, 42), fill=(0, 168, 133))
+        # Arka plan yuvarlak hap
+        draw.ellipse((4, 4, 60, 60), fill=(0, 168, 133, 255))
+        # İç çember / B harfi benzeri stil
+        draw.ellipse((16, 16, 48, 48), fill=(255, 255, 255, 255))
+        draw.ellipse((24, 24, 40, 40), fill=(0, 168, 133, 255))
         return img
 
     def _setup_tray(self):
@@ -623,8 +917,9 @@ class BionlukBotApp:
         image = self._create_tray_image()
         menu = pystray.Menu(
             pystray.MenuItem("Pencereyi Göster", lambda: self.root.after(0, self._restore_window), default=True),
+            pystray.MenuItem("Konsolu Göster", lambda: self.root.after(0, show_console)),
             pystray.MenuItem("Şimdi Tara", lambda: self.root.after(0, self.scheduler.trigger_now)),
-            pystray.MenuItem("Çıkış", lambda: self.root.after(0, self._exit_app_completely)),
+            pystray.MenuItem("Tamamen Kapat", lambda: self.root.after(0, self._exit_app_completely)),
         )
         self.tray_icon = pystray.Icon("BionlukBot", image, "Bionluk İlan Takipçisi", menu)
         threading.Thread(target=self.tray_icon.run, daemon=True, name="TrayThread").start()
@@ -639,6 +934,8 @@ class BionlukBotApp:
         self.root.focus_force()
 
     def _minimize_to_tray(self):
+        """Uygulama arayüzünü ve konsol penceresini sistem tepsisine gizler."""
+        hide_console()
         self.root.withdraw()
         self._setup_tray()
         self.notifier.send_notification(
@@ -648,22 +945,95 @@ class BionlukBotApp:
         )
 
     def _on_close_requested(self):
-        """Kapatma düğmesine basıldığında açık seçenek sunar."""
-        if self.scheduler.is_running():
-            response = messagebox.askyesnocancel(
-                "Kapat veya Küçült",
-                "Tarama şu anda arka planda çalışıyor.\n\n"
-                "• 'Evet' : Sistem tepsisine küçült (taramaya devam et)\n"
-                "• 'Hayır': Uygulamayı tamamen kapat ve taramayı durdur\n"
-                "• 'İptal': Pencerede kal",
-                icon="question",
-            )
-            if response is True:
-                self._minimize_to_tray()
-            elif response is False:
-                self._exit_app_completely()
-        else:
+        """Kapatma (X) düğmesine basıldığında seçenek penceresi sunar."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Kapat veya Arka Planda Çalıştır")
+        dialog.geometry("500x280")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg="#ffffff")
+
+        # Pencereyi ana pencerenin tam ortasına konumlandır
+        self.root.update_idletasks()
+        rx = self.root.winfo_x() + (self.root.winfo_width() // 2) - 250
+        ry = self.root.winfo_y() + (self.root.winfo_height() // 2) - 140
+        dialog.geometry(f"+{max(0, rx)}+{max(0, ry)}")
+
+        container = tk.Frame(dialog, bg="#ffffff", padx=24, pady=20)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            container,
+            text="🛡️  Bionluk Takipçisi Kapatılıyor",
+            font=("Segoe UI", 12, "bold"),
+            bg="#ffffff",
+            fg="#0f172a",
+        ).pack(anchor="w")
+
+        tk.Label(
+            container,
+            text="Uygulamanın arka planda yeni ilanları takip etmeye devam etmesini mi yoksa tamamen kapanmasını mı istersiniz?\n\n"
+                 "• Arka Plan: Pencere ve siyah konsol ekranı sistem tepsisine gizlenir, yeni ilan düştüğünde bildirim gönderir.\n"
+                 "• Tamamen Kapat: Takipçi ve tarayıcı motoru tamamen sonlandırılır.",
+            font=("Segoe UI", 9),
+            bg="#ffffff",
+            fg="#475569",
+            wraplength=450,
+            justify="left",
+        ).pack(anchor="w", pady=(8, 16))
+
+        def on_tray_choice():
+            dialog.destroy()
+            self._minimize_to_tray()
+
+        def on_exit_choice():
+            dialog.destroy()
             self._exit_app_completely()
+
+        btn_tray = tk.Button(
+            container,
+            text="🔄  Arka Planda Çalışmaya Devam Et (Önerilen)",
+            font=("Segoe UI", 10, "bold"),
+            bg="#00a885",
+            fg="#ffffff",
+            activebackground="#008f71",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=16,
+            pady=8,
+            cursor="hand2",
+            command=on_tray_choice,
+        )
+        btn_tray.pack(fill=tk.X, pady=(0, 8))
+
+        btn_exit = tk.Button(
+            container,
+            text="❌  Tamamen Kapat",
+            font=("Segoe UI", 9, "bold"),
+            bg="#fef2f2",
+            fg="#dc2626",
+            activebackground="#fee2e2",
+            activeforeground="#991b1b",
+            relief="flat",
+            padx=16,
+            pady=6,
+            cursor="hand2",
+            command=on_exit_choice,
+        )
+        btn_exit.pack(fill=tk.X, pady=(0, 6))
+
+        btn_cancel = tk.Button(
+            container,
+            text="Vazgeç (Pencerede Kal)",
+            font=("Segoe UI", 8),
+            bg="#ffffff",
+            fg="#94a3b8",
+            relief="flat",
+            cursor="hand2",
+            command=dialog.destroy,
+        )
+        btn_cancel.pack()
 
     def _exit_app_completely(self):
         """Uygulamayı ve çalışan tüm thread'leri temiz biçimde kapatır."""
