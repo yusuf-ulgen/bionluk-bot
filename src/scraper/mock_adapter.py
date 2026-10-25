@@ -42,7 +42,7 @@ class MockScraperAdapter(BaseScraperAdapter):
         if on_complete_callback:
             on_complete_callback(True, "Oturum doğrulandı (Mock)")
 
-    def verify_session(self, url: str = "https://bionluk.com"):
+    def verify_session(self, url: str = "https://bionluk.com/bugun"):
         if self.requires_login_flag:
             return False, "Oturum açık değil"
         return True, "Oturum aktif"

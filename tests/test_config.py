@@ -8,8 +8,13 @@ def test_config_defaults(tmp_path: Path):
     mgr = ConfigManager(config_path=cfg_file)
 
     assert mgr.config.scan_interval_seconds == 60
-    assert mgr.config.target_url == "https://bionluk.com/alici-istekleri"
+    assert mgr.config.target_url == "https://bionluk.com/panel/alici-istekleri"
     assert mgr.config.sound_enabled is True
+
+    # Eski url otomatik olarak /panel/alici-istekleri adresine düzeltilmeli
+    mgr.config.target_url = "https://bionluk.com/alici-istekleri"
+    mgr.config.validate()
+    assert mgr.config.target_url == "https://bionluk.com/panel/alici-istekleri"
 
 
 def test_config_interval_validation(tmp_path: Path):

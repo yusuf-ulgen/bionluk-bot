@@ -390,15 +390,15 @@ class BionlukBotApp:
         messagebox.showinfo(
             "Bionluk Google / Manuel Giriş",
             "Bilgisayarınızda kurulu standart Google Chrome açılacaktır.\n\n"
-            "1. Açılan Chrome penceresinde 'Google ile Giriş Yap' butonuna veya e-posta/şifre alanına tıklayarak hesabınıza giriş yapın.\n"
-            "2. Giriş tamamlandıktan sonra açılan Chrome penceresini kapatın.\n\n"
+            "1. Açılan Chrome penceresinde (https://bionluk.com/login) 'Google ile Giriş Yap' butonuna veya e-posta/şifre alanına tıklayarak hesabınıza giriş yapın.\n"
+            "2. Giriş yapıp sayfa açıldıktan sonra Chrome penceresini kapatın.\n\n"
             "Pencere kapatıldığında uygulamanız oturum durumunu otomatik olarak doğrulayacaktır.",
         )
-        url = self.config_mgr.config.target_url
+        login_url = "https://bionluk.com/login"
         self.lbl_status_msg.configure(text="Durum: Chrome giriş penceresi açık, giriş yapılması bekleniyor...")
         self.badge_lbl.configure(text="GİRİŞ AÇIK", bg="#feebc8", fg="#7b341e")
 
-        self.scraper_adapter.open_login_session(url, on_complete_callback=self._on_login_completed)
+        self.scraper_adapter.open_login_session(login_url, on_complete_callback=self._on_login_completed)
 
     def _on_login_completed(self, success: bool, msg: str):
         """Chrome kapandıktan sonra oturum doğrulama sonucunu arayüzde gösterir."""

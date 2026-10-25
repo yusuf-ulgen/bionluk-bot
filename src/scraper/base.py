@@ -52,7 +52,7 @@ class BaseScraperAdapter(ABC):
         pass
 
     @abstractmethod
-    def verify_session(self, url: str = "https://bionluk.com") -> Tuple[bool, str]:
+    def verify_session(self, url: str = "https://bionluk.com/bugun") -> Tuple[bool, str]:
         """Bionluk oturumunun gerçekten açık olup olmadığını doğrular."""
         pass
 

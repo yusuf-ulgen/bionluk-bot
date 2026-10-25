@@ -124,7 +124,7 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
         def _login_worker():
             with self._lock:
                 self._is_logging_in = True
-                login_target = url if ("giris" in url or "login" in url) else "https://bionluk.com/giris"
+                login_target = url if ("login" in url) else "https://bionluk.com/login"
                 logger.info(f"Normal Google Chrome açılıyor: {chrome_path} (Hedef: {login_target})")
 
                 # Standart Chrome parametreleri (Otomasyon, remote debugging veya stealth YOK!)
@@ -161,8 +161,8 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                 self._is_logging_in = False
                 logger.info("Chrome kapatıldı. Gerçek Bionluk oturumu doğrulanıyor...")
 
-                # Oturumu doğrula
-                is_valid, verify_msg = self.verify_session()
+                # Oturumu /bugun üzerinden doğrula
+                is_valid, verify_msg = self.verify_session("https://bionluk.com/bugun")
                 logger.info(f"Oturum doğrulama sonucu: {is_valid} ({verify_msg})")
 
                 if on_complete_callback:
@@ -170,7 +170,7 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
 
         threading.Thread(target=_login_worker, daemon=True, name="ChromeLoginWorker").start()
 
-    def verify_session(self, url: str = "https://bionluk.com") -> Tuple[bool, str]:
+    def verify_session(self, url: str = "https://bionluk.com/bugun") -> Tuple[bool, str]:
         """
         Bionluk oturumunun gerçekten açık olup olmadığını Playwright ile doğrular.
         Sadece tarayıcının kapanmasını yeterli görmez; gerçek sayfa durumunu denetler.
@@ -198,22 +198,26 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                     context.close()
                     return False, f"Oturum kontrol edilirken sayfaya erişilemedi: {nav_err}"
 
-                # 1. Giriş yapılmadığının açık göstergeleri
-                has_signin_button = page.locator(".signin-button, a[href*='/giris']").count() > 0
+                current_url = page.url.lower()
 
-                # 2. Giriş yapıldığının göstergeleri (avatar, profil, hesap bağlantıları)
+                # 1. Giriş yapılmadığının açık göstergeleri
+                # Not: /giris substring araması yapılmaz; blog/girisimcilik ve urun-veri-girisi ile çakışır.
+                has_signin_button = page.locator("a[href='/login'], a[href$='/login'], .signin-button, .btn-login").count() > 0
+
+                # 2. Giriş yapıldığının göstergeleri (bugun veya panel sayfası, kullanıcı menü öğeleri)
+                is_on_auth_page = "bugun" in current_url or "panel" in current_url
                 has_user_element = page.locator(
-                    ".user-avatar, a[href*='/hesabim'], a[href*='/profil'], [class*='profile-box'], [class*='user-menu']"
+                    "a[href*='/settings'], a[href*='/panel/'], a[href*='cikis'], a[href*='logout'], a[href='/bugun']"
                 ).count() > 0
 
                 # 3. Çerez kontrolü
                 cookies = context.cookies()
-                cookie_names = [c["name"].lower() for c in cookies if "bionluk" in c.get("domain", "").lower()]
-                has_session_cookie = any("session" in n or "remember" in n for n in cookie_names)
+                cookie_names = {c["name"].lower() for c in cookies if "bionluk" in c.get("domain", "").lower()}
+                has_auth_cookie = bool(cookie_names.intersection({"bionluk_authenticated_init", "bionluk_session"}))
 
                 context.close()
 
-                if has_user_element or (has_session_cookie and not has_signin_button):
+                if (is_on_auth_page or has_user_element or has_auth_cookie) and not has_signin_button:
                     return True, "Bionluk oturumu aktif ve başarıyla doğrulandı."
                 else:
                     return False, "Bionluk oturumu açık görünmüyor. Lütfen 'Bionluk'a Giriş Yap' ile hesabınıza giriş yapın."
@@ -294,7 +298,7 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                         )
 
                     # 3. Oturum / Giriş Kontrolü
-                    if "giris" in current_url or "login" in current_url or status_code in (401, 403):
+                    if "/login" in current_url or status_code in (401, 403):
                         context.close()
                         return ScrapeResult(
                             success=False,
@@ -318,8 +322,8 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
 
                     # 5. Boş liste kontrolü: Gerçekten 0 istek mi var yoksa sayfa açılamadı / oturum mu yok?
                     if not listings:
-                        has_login_button = "signin-button" in page_content or "giriş yap" in page_content
-                        is_target_different = url.rstrip("/") != current_url.rstrip("/") and ("giris" in current_url or current_url == "https://bionluk.com")
+                        has_login_button = bool(page.locator("a[href='/login'], a[href$='/login'], .signin-button").count() > 0)
+                        is_target_different = url.rstrip("/") != current_url.rstrip("/") and ("/login" in current_url or current_url == "https://bionluk.com")
 
                         if has_login_button or is_target_different:
                             context.close()
@@ -367,6 +371,8 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
             const items = [];
             
             const cardSelectors = [
+                '.request-box',
+                '[class*="request-box"]',
                 '.custom-order-item',
                 '.buyer-request-item',
                 '.buyer-request',
@@ -449,7 +455,10 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                 } else if (url && url !== window.location.href) {
                     id = url;
                 } else {
-                    id = 'item_' + index + '_' + title.slice(0, 20);
+                    const lines = textContent.split('\\n').map(l => l.trim()).filter(Boolean);
+                    const buyer = lines[0] || '';
+                    const slug = (buyer + '_' + title).toLowerCase().replace(/[^a-z0-9ğüşıöç]+/gi, '_').slice(0, 50);
+                    id = slug || ('item_' + index);
                 }
 
                 items.push({

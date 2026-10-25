@@ -14,7 +14,7 @@ from typing import List, Tuple
 
 logger = logging.getLogger("bionluk_bot.config")
 
-DEFAULT_URL = "https://bionluk.com/alici-istekleri"
+DEFAULT_URL = "https://bionluk.com/panel/alici-istekleri"
 DEFAULT_INTERVAL_SECONDS = 60
 MIN_INTERVAL_SECONDS = 5
 
@@ -37,6 +37,10 @@ class AppConfig:
         target = self.target_url.strip().lower()
         if not (target.startswith("http://") or target.startswith("https://")):
             return False, "Takip URL'si 'http://' veya 'https://' ile başlamalıdır."
+
+        # Eski /alici-istekleri URL'sini güncel /panel/alici-istekleri adresine otomatik düzelt
+        if target.rstrip("/") == "https://bionluk.com/alici-istekleri":
+            self.target_url = "https://bionluk.com/panel/alici-istekleri"
 
         try:
             val = int(self.scan_interval_seconds)
