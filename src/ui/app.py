@@ -7,6 +7,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import queue
+import re
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -59,6 +60,7 @@ class BionlukBotApp:
         filter_engine: FilterEngine,
         notifier: WindowsNotifier,
         scraper_adapter: BaseScraperAdapter,
+        root: Optional[tk.Tk] = None,
     ):
         self.config_mgr = config_mgr
         self.storage = storage
@@ -66,7 +68,7 @@ class BionlukBotApp:
         self.notifier = notifier
         self.scraper_adapter = scraper_adapter
 
-        self.root = tk.Tk()
+        self.root = root if root is not None else tk.Tk()
         self.root.title("Bionluk İlan Takipçisi")
         self.root.geometry("1020x760")
         self.root.minsize(880, 640)
@@ -133,10 +135,7 @@ class BionlukBotApp:
         self.style.configure("Header.TLabel", font=("Segoe UI", 13, "bold"), background=self.color_card, foreground="#0f172a")
         self.style.configure("SubHeader.TLabel", font=("Segoe UI", 10, "bold"), background=self.color_card, foreground="#1e293b")
 
-        # Sekme (Notebook) Stili
-        self.style.configure("TNotebook", background=self.color_bg, borderwidth=0)
-        self.style.configure("TNotebook.Tab", font=("Segoe UI", 9, "bold"), padding=(16, 7), background="#f1f5f9", foreground="#475569")
-        self.style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#00a885")])
+
 
         # Treeview Stili
         self.style.configure(
@@ -238,17 +237,47 @@ class BionlukBotApp:
         )
         self.lbl_last_success.pack(side=tk.LEFT)
 
-        # 2. SEKMELER (KONTROLLER VE AYARLAR)
-        notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill=tk.X, pady=(0, 10))
+        # 2. SEKMELER (KONTROLLER VE AYARLAR) - EŞİT BOYUTLU VE SEÇİLİ RENKLİ
+        tab_bar_frame = tk.Frame(main_frame, bg=self.color_bg)
+        tab_bar_frame.pack(anchor="w", pady=(0, 0))
 
-        tab_controls = tk.Frame(notebook, bg=self.color_card, padx=12, pady=12)
-        tab_filters = tk.Frame(notebook, bg=self.color_card, padx=14, pady=12)
-        tab_settings = tk.Frame(notebook, bg=self.color_card, padx=14, pady=12)
+        content_card = tk.Frame(
+            main_frame,
+            bg=self.color_card,
+            padx=14,
+            pady=12,
+            highlightthickness=1,
+            highlightbackground=self.color_border,
+        )
+        content_card.pack(fill=tk.X, pady=(0, 10))
 
-        notebook.add(tab_controls, text="  Ana Kontroller  ")
-        notebook.add(tab_filters, text="  Filtreler (Dahil / Hariç)  ")
-        notebook.add(tab_settings, text="  Tarama & Sistem Ayarları  ")
+        tab_controls = tk.Frame(content_card, bg=self.color_card)
+        tab_filters = tk.Frame(content_card, bg=self.color_card)
+        tab_settings = tk.Frame(content_card, bg=self.color_card)
+
+        self._tab_frames = [tab_controls, tab_filters, tab_settings]
+        self._tab_buttons = []
+
+        tabs_data = [
+            ("Ana Kontroller", 0),
+            ("Filtreler (Dahil / Hariç)", 1),
+            ("Tarama & Sistem Ayarları", 2),
+        ]
+
+        for title, idx in tabs_data:
+            btn = tk.Button(
+                tab_bar_frame,
+                text=f"  {title}  ",
+                font=("Segoe UI", 9, "bold"),
+                relief="flat",
+                bd=0,
+                padx=16,
+                pady=8,
+                cursor="hand2",
+                command=lambda i=idx: self._switch_tab(i),
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 4))
+            self._tab_buttons.append(btn)
 
         # --- SEKME 1: ANA KONTROLLER (RENKLİ & MODERN BUTONLAR) ---
         ctrl_row = tk.Frame(tab_controls, bg=self.color_card)
@@ -501,6 +530,7 @@ class BionlukBotApp:
         ttk.Checkbutton(options_row, text="Windows Başlangıcında Otomatik Başlat", variable=self.var_autostart, command=self._toggle_autostart).pack(side=tk.LEFT)
 
         set_grid.columnconfigure(0, weight=1)
+        self._switch_tab(0)
 
         # 3. İLANLAR LİSTESİ (TREEVIEW)
         list_card = tk.Frame(
@@ -543,9 +573,10 @@ class BionlukBotApp:
         columns = ("time", "title", "budget", "category", "match", "status")
         self.tree = ttk.Treeview(list_card, columns=columns, show="headings", selectmode="browse")
 
-        self.tree.heading("time", text="Zaman")
+        self._sort_orders = {"time": "desc", "budget": "none"}
+        self.tree.heading("time", text="Zaman ▼", command=lambda: self._sort_by_column("time"))
         self.tree.heading("title", text="İlan Başlığı")
-        self.tree.heading("budget", text="Bütçe")
+        self.tree.heading("budget", text="Bütçe ⇅", command=lambda: self._sort_by_column("budget"))
         self.tree.heading("category", text="Kategori")
         self.tree.heading("match", text="Eşleşen Kelime")
         self.tree.heading("status", text="Bildirim Durumu")
@@ -593,23 +624,91 @@ class BionlukBotApp:
         self.ent_exclude.delete(0, tk.END)
         self.ent_exclude.insert(0, ", ".join(cfg.excluded_keywords))
 
-        # Son tarama zamanları
+        # Son tarama zamanları ve hesap bağlantı durumu
         last_success = self.storage.get_last_successful_scan()
         if last_success:
             self.lbl_last_success.configure(text=f"Son Başarılı: {last_success}")
+            self.btn_login.configure(
+                text="✅  Hesap Bağlı (Chrome)",
+                bg="#f1f5f9",
+                fg="#475569",
+                activebackground="#e2e8f0",
+                activeforeground="#1e293b",
+            )
 
-        # Mevcut ilanları listele
-        recent_listings = self.storage.get_recent_listings(limit=100)
-        for item in recent_listings:
-            self._insert_tree_item(item)
+        # Eski oturumdan kalan ilanlar yüklenmez; tablo mevcut çalışma oturumuna özel başlar.
+
+    def _switch_tab(self, selected_idx: int):
+        """Sekmeler arasında geçiş yapar; tüm sekme butonları eşit boyutta kalır ve seçili olan renklenir."""
+        for i, (btn, frame) in enumerate(zip(self._tab_buttons, self._tab_frames)):
+            if i == selected_idx:
+                btn.configure(
+                    bg="#00a885",
+                    fg="#ffffff",
+                    activebackground="#008f71",
+                    activeforeground="#ffffff",
+                )
+                frame.pack(fill=tk.BOTH, expand=True)
+            else:
+                btn.configure(
+                    bg="#e2e8f0",
+                    fg="#475569",
+                    activebackground="#cbd5e1",
+                    activeforeground="#0f172a",
+                )
+                frame.pack_forget()
+
+    def _reapply_row_tags(self):
+        """Tablodaki satırların dönüşümlü zebra renklerini günceller."""
+        for idx, item_id in enumerate(self.tree.get_children("")):
+            tag = "evenrow" if idx % 2 == 0 else "oddrow"
+            self.tree.item(item_id, tags=(tag,))
+
+    def _sort_by_column(self, col: str):
+        """Zaman ve Bütçe sütunlarına göre artan/azalan dikey sıralama yapar."""
+        current_order = self._sort_orders.get(col, "none")
+        new_order = "asc" if current_order == "desc" else "desc"
+        self._sort_orders[col] = new_order
+
+        for other_col in ["time", "budget"]:
+            if other_col != col:
+                self._sort_orders[other_col] = "none"
+
+        time_arrow = "▼" if self._sort_orders.get("time") == "desc" else ("▲" if self._sort_orders.get("time") == "asc" else "⇅")
+        budget_arrow = "▼" if self._sort_orders.get("budget") == "desc" else ("▲" if self._sort_orders.get("budget") == "asc" else "⇅")
+
+        self.tree.heading("time", text=f"Zaman {time_arrow}")
+        self.tree.heading("budget", text=f"Bütçe {budget_arrow}")
+
+        children = self.tree.get_children("")
+        if not children:
+            return
+
+        def parse_budget(text: str) -> int:
+            digits = re.sub(r"[^\d]", "", text or "")
+            return int(digits) if digits else 0
+
+        reverse = (new_order == "desc")
+
+        if col == "time":
+            items = [(self.tree.set(k, "time"), k) for k in children]
+            items.sort(key=lambda x: x[0], reverse=reverse)
+        elif col == "budget":
+            items = [(parse_budget(self.tree.set(k, "budget")), k) for k in children]
+            items.sort(key=lambda x: x[0], reverse=reverse)
+        else:
+            return
+
+        for index, (_, k) in enumerate(items):
+            self.tree.move(k, "", index)
+
+        self._reapply_row_tags()
 
     def _insert_tree_item(self, item: StoredListing):
         status_txt = "Bildirildi" if item.notified else ("Hata" if item.notification_error else "Bekliyor")
         time_display = item.first_seen_at[:19].replace("T", " ") if item.first_seen_at else "--"
 
-        row_count = len(self.tree.get_children())
-        tag = "evenrow" if row_count % 2 == 0 else "oddrow"
-
+        # Yeni ilanlar her zaman tablonun EN BAŞINA (index 0) eklenir
         self.tree.insert(
             "",
             0,
@@ -622,8 +721,8 @@ class BionlukBotApp:
                 item.matched_keyword or "Tümü",
                 status_txt,
             ),
-            tags=(tag,),
         )
+        self._reapply_row_tags()
 
     # --- BUTON VE AKSİYON İŞLEYİCİLERİ ---
 
@@ -668,6 +767,16 @@ class BionlukBotApp:
             )
             return
 
+        if "Bağlı" in self.btn_login.cget("text"):
+            res = messagebox.askyesno(
+                "Hesap Zaten Bağlı",
+                "Bionluk hesabınız şu anda bağlı ve aktif durumda.\n\n"
+                "Hesap değiştirmek veya Chrome oturumunu yeniden açmak istiyor musunuz?",
+                icon="question",
+            )
+            if not res:
+                return
+
         messagebox.showinfo(
             "Bionluk Google / Manuel Giriş",
             "Bilgisayarınızda kurulu standart Google Chrome açılacaktır.\n\n"
@@ -685,21 +794,35 @@ class BionlukBotApp:
         """Chrome kapandıktan sonra oturum doğrulama sonucunu arayüzde gösterir."""
         def _ui_update():
             if success:
-                self.badge_lbl.configure(text="OTURUM AKTİF", bg="#c6f6d5", fg="#22543d")
-                self.lbl_status_msg.configure(text="Durum: Oturum başarıyla doğrulandı. Taramaya hazır.")
+                self.badge_lbl.configure(text="OTURUM AKTİF", bg="#ecfdf5", fg="#047857")
+                self.lbl_status_msg.configure(text="Durum: Bionluk Bağlantısı: Aktif (Oturum Açık)")
+                self.btn_login.configure(
+                    text="✅  Hesap Bağlı (Chrome)",
+                    bg="#f1f5f9",
+                    fg="#475569",
+                    activebackground="#e2e8f0",
+                    activeforeground="#1e293b",
+                )
                 messagebox.showinfo(
                     "Oturum Doğrulandı",
                     "Tebrikler! Bionluk hesabınız başarıyla doğrulandı.\n\n"
                     "Artık 'Taramayı Başlat' düğmesine basarak ilan takibini başlatabilirsiniz.",
                 )
             else:
-                self.badge_lbl.configure(text="GİRİŞ GEREKİYOR", bg="#fed7d7", fg="#9b2c2c")
+                self.badge_lbl.configure(text="GİRİŞ GEREKİYOR", bg="#fef2f2", fg="#991b1b")
                 self.lbl_status_msg.configure(text=f"Durum: {msg[:50]}")
+                self.btn_login.configure(
+                    text="🔑  Bionluk Girişi Yap (Gerekli)",
+                    bg="#0284c7",
+                    fg="#ffffff",
+                    activebackground="#0369a1",
+                    activeforeground="#ffffff",
+                )
                 messagebox.showwarning(
                     "Oturum Doğrulanamadı",
                     f"Giriş penceresi kapatıldı ancak geçerli bir Bionluk oturumu tespit edilemedi:\n\n"
                     f"{msg}\n\n"
-                    f"Lütfen 'Bionluk'a Giriş Yap' düğmesine basarak hesabınıza başarıyla giriş yaptığınızdan emin olun.",
+                    f"Lütfen 'Bionluk Girişi Yap' düğmesine basarak hesabınıza başarıyla giriş yaptığınızdan emin olun.",
                 )
 
         self.root.after(0, _ui_update)
@@ -877,9 +1000,34 @@ class BionlukBotApp:
             self._set_btn_state(self.btn_start, True, "#00a885")
             self._set_btn_state(self.btn_stop, False, "#ef4444")
 
+        # Hesap bağlantı durumu ve Giriş Butonu stili
         if status.requires_login:
             self.badge_lbl.configure(text="GİRİŞ GEREKİYOR", bg="#fef2f2", fg="#991b1b")
             self.lbl_status_msg.configure(fg="#dc2626")
+            self.btn_login.configure(
+                text="🔑  Bionluk Girişi Yap (Gerekli)",
+                bg="#0284c7",
+                fg="#ffffff",
+                activebackground="#0369a1",
+                activeforeground="#ffffff",
+            )
+        elif status.last_successful_scan_time or "Aktif" in (status.status_message or ""):
+            # Hesap bağlı -> Soluk/sakin renk ve "Hesap Bağlı"
+            self.btn_login.configure(
+                text="✅  Hesap Bağlı (Chrome)",
+                bg="#f1f5f9",
+                fg="#475569",
+                activebackground="#e2e8f0",
+                activeforeground="#1e293b",
+            )
+        else:
+            self.btn_login.configure(
+                text="🔑  Bionluk Girişi (Chrome)",
+                bg="#0284c7",
+                fg="#ffffff",
+                activebackground="#0369a1",
+                activeforeground="#ffffff",
+            )
 
         # Durum mesajı (Bağlantı ve oturum durumu)
         status_text = status.status_message or "Hazır"

@@ -269,6 +269,11 @@ class JobScheduler:
                             notified=True,
                             matched_keyword=eval_res.matched_include or "Başlangıç İlanı",
                         )
+                        if self.on_new_listing_callback:
+                            try:
+                                self.on_new_listing_callback(item, eval_res.matched_include or "")
+                            except Exception as cb_err:
+                                logger.error(f"Başlangıç ilan arayüz callback hatası: {cb_err}")
                     else:
                         # Kalan diğer eski ilanları sessizce kaydet (bildirim yağmurunu önle)
                         self.storage.save_listing(
@@ -281,12 +286,6 @@ class JobScheduler:
                             notified=True,
                             matched_keyword=eval_res.matched_include or "Başlangıç Kaydı",
                         )
-
-                    if self.on_new_listing_callback:
-                        try:
-                            self.on_new_listing_callback(item, eval_res.matched_include or "")
-                        except Exception as cb_err:
-                            logger.error(f"Başlangıç ilan arayüz callback hatası: {cb_err}")
 
                 self.storage.set_baseline_established()
                 self._is_first_scan_of_session = False
@@ -348,6 +347,11 @@ class JobScheduler:
                                 notified=True,
                                 matched_keyword=eval_res.matched_include or "",
                             )
+                            if self.on_new_listing_callback:
+                                try:
+                                    self.on_new_listing_callback(item, eval_res.matched_include or "")
+                                except Exception as cb_err:
+                                    logger.error(f"Yeni ilan callback hatası: {cb_err}")
                         else:
                             self.storage.save_listing(
                                 listing_id=item.id,
@@ -359,12 +363,6 @@ class JobScheduler:
                                 notified=True,
                                 matched_keyword=eval_res.matched_include or "",
                             )
-
-                        if self.on_new_listing_callback:
-                            try:
-                                self.on_new_listing_callback(item, eval_res.matched_include or "")
-                            except Exception as cb_err:
-                                logger.error(f"Yeni ilan callback hatası: {cb_err}")
                 else:
                     # Normal çalışma (veya tek yeni ilan): HER yeni ilan için sınırsız bildirim gönder!
                     for item, eval_res in new_matching_items:
