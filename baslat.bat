@@ -1,17 +1,16 @@
 @echo off
-chcp 65001 >nul
-title Bionluk İlan Takipçisi
+setlocal
+cd /d "%~dp0"
+title Bionluk Ilan Takipcisi
 
 echo ========================================================
-echo        Bionluk İlan & Alıcı İstekleri Takipçisi
+echo        Bionluk Ilan ve Alici Istekleri Takipcisi
 echo ========================================================
 echo.
 
-cd /d "%~dp0"
-
 if not exist ".venv\Scripts\python.exe" (
-    echo [HATA] Sanal ortam (.venv) bulunamadi!
-    echo Lutfen once asagidaki komutla ortami olusturun:
+    echo [HATA] Sanal ortam ^(.venv^) bulunamadi!
+    echo Lutfen once asagidaki komutlarla ortami olusturun:
     echo    python -m venv .venv
     echo    .venv\Scripts\pip install -r requirements.txt
     echo    .venv\Scripts\playwright install chromium
@@ -25,7 +24,8 @@ echo Uygulama baslatiliyor, lutfen bekleyin...
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [BILGI] Uygulama bir hata ile sonlandi veya kapandi (Hata Kodu: %ERRORLEVEL%).
-    echo Ayrintilar icin 'data\logs\bot.log' dosyasini inceleyebilirsiniz.
+    echo [BILGI] Uygulama bir hata ile sonlandi (Hata Kodu: %ERRORLEVEL%).
+    echo Ayrintilar icin data\logs\bot.log dosyasini inceleyebilirsiniz.
+    echo.
     pause
 )
