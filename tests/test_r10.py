@@ -33,3 +33,4 @@ def test_r10_first_scan_is_silent_then_new_topic_notifies(tmp_path):
     scheduler._execute_scan()
     assert len(notifier.sent_notifications) == 1
     assert notifier.sent_notifications[0]["title"] == "Yeni R10 İlanı!"
+    assert notifier.sent_notifications[0]["message"].startswith("[R10]")

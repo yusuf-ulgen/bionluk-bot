@@ -258,7 +258,7 @@ class JobScheduler:
                         first_notif_sent = True
                         new_items_count += 1
                         budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
-                        msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
+                        msg = f"[{self.source_name}] {item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
                         sent_ok, send_err = self.notifier.send_notification(
                             title=f"{self.source_name} Takipçisi Aktif (Son İlan)",
                             message=msg,
@@ -329,7 +329,7 @@ class JobScheduler:
                             logger.info(f"Teslim edilemeyen ilan için bildirim tekrar deneniyor: {item.title}")
                             budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
                             matched_kw = self.storage.get_matched_keyword(item.id) or "Filtre Eşleşmesi"
-                            msg = f"{item.title}{budget_info}\nEşleşen: {matched_kw}"
+                            msg = f"[{self.source_name}] {item.title}{budget_info}\nEşleşen: {matched_kw}"
                             sent_ok, send_err = self.notifier.send_notification(
                                 title=f"Yeni {self.source_name} İlanı!",
                                 message=msg,
@@ -353,7 +353,7 @@ class JobScheduler:
                         if idx == 0:
                             new_items_count += 1
                             budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
-                            msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
+                            msg = f"[{self.source_name}] {item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
                             sent_ok, send_err = self.notifier.send_notification(
                                 title=f"{self.source_name} Takipçisi Aktif (Son İlan)",
                                 message=msg,
@@ -392,7 +392,7 @@ class JobScheduler:
                         new_items_count += 1
                         logger.info(f"Yeni eşleşen ilan bulundu: {item.title}")
                         budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
-                        msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
+                        msg = f"[{self.source_name}] {item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
                         sent_ok, send_err = self.notifier.send_notification(
                             title=f"Yeni {self.source_name} İlanı!",
                             message=msg,

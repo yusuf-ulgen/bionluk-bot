@@ -6,6 +6,8 @@ R10 için **R10 Girişi (Chrome)** düğmesine basın. Açılan iş verenler say
 
 R10 sayfası güvenlik doğrulaması veya erişim sınırı gösterirse uygulama bunu durum alanında bildirir. Doğrulamayı Chrome'da elle tamamlayın; uygulama güvenlik kontrolünü aşmaya çalışmaz.
 
+**Tarama & Sistem Ayarları** sekmesinde Bionluk adresini değiştirebilir, izlenen R10 kategori bağlantısını açabilir ve R10 takibini açıp kapatabilirsiniz. Tarama aralığı iki site için ortaktır. **Şimdi Tara** etkin kaynakların ikisini de tetikler; üst bölümde her sitenin durumu, sonraki taraması ve son başarılı taraması ayrı görünür. İlan listesindeki **İlan Sitesi** seçimi ile Tümü, Bionluk veya R10 kayıtlarını görüntüleyebilirsiniz. Bildirim başlığı ve metni kaynağı açıkça belirtir.
+
 ---
 
 ## 🚀 Öne Çıkan Özellikler

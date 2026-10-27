@@ -74,7 +74,7 @@ class BionlukBotApp:
         self.r10_storage = r10_storage
 
         self.root = root if root is not None else tk.Tk()
-        self.root.title("Bionluk İlan Takipçisi")
+        self.root.title("Bionluk ve R10 İlan Takipçisi")
         self.root.geometry("1020x760")
         self.root.minsize(880, 640)
 
@@ -84,6 +84,9 @@ class BionlukBotApp:
         # Sistem tepsisi simgesi
         self.tray_icon: Optional[pystray.Icon] = None
         self.is_tray_running = False
+        self._listing_sources: dict[str, str] = {}
+        self._listing_urls: dict[str, str] = {}
+        self._listing_order: list[str] = []
 
         # Scheduler başlat
         self.scheduler = JobScheduler(
@@ -224,7 +227,7 @@ class BionlukBotApp:
 
         self.lbl_status_msg = tk.Label(
             info_row,
-            text="Durum: Beklemede",
+            text="Bionluk: Beklemede",
             font=("Segoe UI", 9, "bold"),
             bg=self.color_card,
             fg=self.color_primary,
@@ -257,6 +260,29 @@ class BionlukBotApp:
             fg=self.color_text_muted,
         )
         self.lbl_last_success.pack(side=tk.LEFT)
+
+        r10_info_row = tk.Frame(status_card, bg=self.color_card)
+        r10_info_row.pack(fill=tk.X, pady=(6, 0))
+        self.lbl_r10_status = tk.Label(
+            r10_info_row, text="R10: Beklemede", font=("Segoe UI", 9, "bold"),
+            bg=self.color_card, fg=self.color_text_muted,
+        )
+        self.lbl_r10_status.pack(side=tk.LEFT, padx=(0, 24))
+        self.lbl_r10_next = tk.Label(
+            r10_info_row, text="Kalan Süre: --", font=("Segoe UI", 9, "bold"),
+            bg=self.color_card, fg=self.color_text,
+        )
+        self.lbl_r10_next.pack(side=tk.LEFT, padx=(0, 24))
+        self.lbl_r10_last_scan = tk.Label(
+            r10_info_row, text="Son Tarama: Henüz yapılmadı", font=("Segoe UI", 9),
+            bg=self.color_card, fg=self.color_text_muted,
+        )
+        self.lbl_r10_last_scan.pack(side=tk.LEFT, padx=(0, 24))
+        self.lbl_r10_last_success = tk.Label(
+            r10_info_row, text="Son Başarılı: Henüz yok", font=("Segoe UI", 9),
+            bg=self.color_card, fg=self.color_text_muted,
+        )
+        self.lbl_r10_last_success.pack(side=tk.LEFT)
 
         # 2. SEKMELER (KONTROLLER VE AYARLAR) - EŞİT BOYUTLU VE SEÇİLİ RENKLİ
         tab_bar_frame = tk.Frame(main_frame, bg=self.color_bg)
@@ -370,19 +396,13 @@ class BionlukBotApp:
         )
         self.btn_login.pack(side=tk.LEFT, padx=(0, 8))
 
-        r10_row = tk.Frame(tab_controls, bg=self.color_card)
-        r10_row.pack(fill=tk.X, pady=(8, 0))
         self.btn_r10_login = tk.Button(
-            r10_row, text="🔑  R10 Girişi (Chrome)", font=("Segoe UI", 9, "bold"),
-            bg="#0284c7", fg="#ffffff", relief="flat", padx=12, pady=7,
+            ctrl_row, text="🔑  R10 Girişi (Chrome)", font=("Segoe UI", 9, "bold"),
+            bg="#0284c7", fg="#ffffff", activebackground="#0369a1",
+            activeforeground="#ffffff", relief="flat", padx=12, pady=7,
             cursor="hand2", command=self._open_r10_login,
         )
-        self.btn_r10_login.pack(side=tk.LEFT, padx=(0, 12))
-        self.lbl_r10_status = tk.Label(
-            r10_row, text="R10: Giriş bekleniyor", bg=self.color_card,
-            fg=self.color_text_muted, font=("Segoe UI", 9),
-        )
-        self.lbl_r10_status.pack(side=tk.LEFT)
+        self.btn_r10_login.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_test_notif = tk.Button(
             ctrl_row,
@@ -510,17 +530,39 @@ class BionlukBotApp:
             command=self._save_url,
         ).pack(side=tk.LEFT)
 
+        tk.Label(
+            set_grid, text="R10 Yazılım & Kodlama İş Verenler:",
+            font=("Segoe UI", 9, "bold"), bg=self.color_card, fg="#0f172a",
+        ).grid(row=2, column=0, sticky="w", pady=(2, 2))
+        r10_url_row = tk.Frame(set_grid, bg=self.color_card)
+        r10_url_row.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        self.ent_r10_url = ttk.Entry(r10_url_row)
+        self.ent_r10_url.insert(0, R10_URL)
+        self.ent_r10_url.configure(state="readonly")
+        self.ent_r10_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        tk.Button(
+            r10_url_row, text="R10'u Aç", font=("Segoe UI", 9),
+            bg="#f1f5f9", fg="#1e293b", relief="flat", padx=10, pady=4,
+            cursor="hand2", command=lambda: webbrowser.open(R10_URL),
+        ).pack(side=tk.LEFT)
+
+        self.var_r10_enabled = tk.BooleanVar(value=self.config_mgr.config.r10_enabled)
+        ttk.Checkbutton(
+            set_grid, text="R10 ilanlarını takip et", variable=self.var_r10_enabled,
+            command=self._toggle_r10,
+        ).grid(row=4, column=0, sticky="w", pady=(0, 8))
+
         # Tarama Aralığı
         tk.Label(
             set_grid,
-            text="Tarama Aralığı (Saniye):",
+            text="Her İki Site İçin Tarama Aralığı (Saniye):",
             font=("Segoe UI", 9, "bold"),
             bg=self.color_card,
             fg="#0f172a",
-        ).grid(row=2, column=0, sticky="w", pady=(0, 2))
+        ).grid(row=5, column=0, sticky="w", pady=(0, 2))
 
         interval_row = tk.Frame(set_grid, bg=self.color_card)
-        interval_row.grid(row=3, column=0, sticky="w", pady=(0, 8))
+        interval_row.grid(row=6, column=0, sticky="w", pady=(0, 8))
 
         self.ent_interval = ttk.Entry(interval_row, width=8)
         self.ent_interval.pack(side=tk.LEFT, padx=(0, 8))
@@ -556,7 +598,7 @@ class BionlukBotApp:
 
         # Seçenekler (Ses ve Başlangıç)
         options_row = tk.Frame(set_grid, bg=self.color_card)
-        options_row.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        options_row.grid(row=7, column=0, sticky="w", pady=(8, 0))
 
         self.var_sound = tk.BooleanVar(value=self.config_mgr.config.sound_enabled)
         ttk.Checkbutton(options_row, text="Bildirimde Ses Çal", variable=self.var_sound, command=self._toggle_sound).pack(side=tk.LEFT, padx=(0, 25))
@@ -604,24 +646,38 @@ class BionlukBotApp:
             command=self._open_selected_listing,
         ).pack(side=tk.RIGHT)
 
+        self.var_site_filter = tk.StringVar(value="Tümü")
+        site_filter = ttk.Combobox(
+            list_header, textvariable=self.var_site_filter,
+            values=("Tümü", "Bionluk", "R10"), state="readonly", width=10,
+        )
+        site_filter.pack(side=tk.RIGHT, padx=(0, 12))
+        site_filter.bind("<<ComboboxSelected>>", self._apply_site_filter)
+        tk.Label(
+            list_header, text="İlan Sitesi:", font=("Segoe UI", 9, "bold"),
+            bg=self.color_card, fg=self.color_text,
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+
         # Tablo
-        columns = ("time", "title", "budget", "category", "match", "status")
+        columns = ("time", "site", "title", "budget", "category", "match", "status")
         self.tree = ttk.Treeview(list_card, columns=columns, show="headings", selectmode="browse")
 
         self._sort_orders = {"time": "desc", "budget": "none"}
         self.tree.heading("time", text="Zaman ▼", command=lambda: self._sort_by_column("time"))
+        self.tree.heading("site", text="İlan Sitesi")
         self.tree.heading("title", text="İlan Başlığı")
         self.tree.heading("budget", text="Bütçe ⇅", command=lambda: self._sort_by_column("budget"))
         self.tree.heading("category", text="Kategori")
         self.tree.heading("match", text="Eşleşen Kelime")
-        self.tree.heading("status", text="Bildirim Durumu")
+        self.tree.heading("status", text="Bildirim")
 
         self.tree.column("time", width=140, anchor="center")
-        self.tree.column("title", width=380, anchor="w")
-        self.tree.column("budget", width=100, anchor="center")
-        self.tree.column("category", width=120, anchor="center")
-        self.tree.column("match", width=110, anchor="center")
-        self.tree.column("status", width=110, anchor="center")
+        self.tree.column("site", width=80, anchor="center")
+        self.tree.column("title", width=310, anchor="w")
+        self.tree.column("budget", width=90, anchor="center")
+        self.tree.column("category", width=90, anchor="center")
+        self.tree.column("match", width=90, anchor="center")
+        self.tree.column("status", width=100, anchor="center")
 
         # Alternating row tag colors
         self.tree.tag_configure("evenrow", background="#ffffff")
@@ -663,6 +719,12 @@ class BionlukBotApp:
         last_success = self.storage.get_last_successful_scan()
         if last_success:
             self.lbl_last_success.configure(text=f"Son Başarılı: {last_success}")
+        if self.r10_storage:
+            r10_success = self.r10_storage.get_last_successful_scan()
+            if r10_success:
+                self.lbl_r10_last_success.configure(text=f"Son Başarılı: {r10_success}")
+        if not cfg.r10_enabled:
+            self.lbl_r10_status.configure(text="R10: Takip kapalı")
 
         # Eski oturumdan kalan ilanlar yüklenmez; tablo mevcut çalışma oturumuna özel başlar.
 
@@ -691,6 +753,33 @@ class BionlukBotApp:
         for idx, item_id in enumerate(self.tree.get_children("")):
             tag = "evenrow" if idx % 2 == 0 else "oddrow"
             self.tree.item(item_id, tags=(tag,))
+
+    @staticmethod
+    def _listing_site(item: StoredListing) -> str:
+        return "R10" if item.listing_id.startswith("r10:") or "r10.net" in item.url.lower() else "Bionluk"
+
+    def _apply_site_filter(self, _event=None):
+        selected = self.var_site_filter.get()
+        visible_ids = [
+            listing_id for listing_id in self._listing_order
+            if selected == "Tümü" or self._listing_sources[listing_id] == selected
+        ]
+        active_sort = next(
+            (col for col in ("time", "budget") if self._sort_orders.get(col) in ("asc", "desc")),
+            None,
+        )
+        if active_sort:
+            if active_sort == "budget":
+                key = lambda listing_id: int(re.sub(r"[^\d]", "", self.tree.set(listing_id, "budget")) or 0)
+            else:
+                key = lambda listing_id: self.tree.set(listing_id, "time")
+            visible_ids.sort(key=key, reverse=self._sort_orders[active_sort] == "desc")
+        for listing_id in self._listing_order:
+            if listing_id not in visible_ids:
+                self.tree.detach(listing_id)
+        for listing_id in reversed(visible_ids):
+            self.tree.move(listing_id, "", 0)
+        self._reapply_row_tags()
 
     def _sort_by_column(self, col: str):
         """Zaman ve Bütçe sütunlarına göre artan/azalan dikey sıralama yapar."""
@@ -735,6 +824,10 @@ class BionlukBotApp:
     def _insert_tree_item(self, item: StoredListing):
         status_txt = "Bildirildi" if item.notified else ("Hata" if item.notification_error else "Bekliyor")
         time_display = item.first_seen_at[:19].replace("T", " ") if item.first_seen_at else "--"
+        site = self._listing_site(item)
+        self._listing_sources[item.listing_id] = site
+        self._listing_urls[item.listing_id] = item.url
+        self._listing_order.insert(0, item.listing_id)
 
         # Yeni ilanlar her zaman tablonun EN BAŞINA (index 0) eklenir
         self.tree.insert(
@@ -743,6 +836,7 @@ class BionlukBotApp:
             iid=item.listing_id,
             values=(
                 time_display,
+                site,
                 item.title,
                 item.budget or "-",
                 item.category or "-",
@@ -750,7 +844,7 @@ class BionlukBotApp:
                 status_txt,
             ),
         )
-        self._reapply_row_tags()
+        self._apply_site_filter()
 
     # --- BUTON VE AKSİYON İŞLEYİCİLERİ ---
 
@@ -758,7 +852,7 @@ class BionlukBotApp:
         self._set_btn_state(self.btn_start, False, "#00a885")
         self._set_btn_state(self.btn_stop, True, "#ef4444")
         self.scheduler.start()
-        if self.r10_scheduler:
+        if self.r10_scheduler and self.config_mgr.config.r10_enabled:
             self.r10_scheduler.start()
 
     def _stop_scanning(self):
@@ -770,7 +864,7 @@ class BionlukBotApp:
 
     def _scan_now(self):
         self.scheduler.trigger_now()
-        if self.r10_scheduler:
+        if self.r10_scheduler and self.config_mgr.config.r10_enabled:
             self.r10_scheduler.trigger_now()
         self._set_btn_state(self.btn_start, False, "#00a885")
         self._set_btn_state(self.btn_stop, True, "#ef4444")
@@ -881,6 +975,23 @@ class BionlukBotApp:
         else:
             messagebox.showerror("Geçersiz Değer", msg)
 
+    def _toggle_r10(self):
+        enabled = self.var_r10_enabled.get()
+        self.config_mgr.config.r10_enabled = enabled
+        ok, msg = self.config_mgr.save()
+        if not ok:
+            self.var_r10_enabled.set(not enabled)
+            self.config_mgr.config.r10_enabled = not enabled
+            messagebox.showerror("R10 Ayarı", msg)
+            return
+        if self.r10_scheduler:
+            if enabled and self.scheduler.is_running():
+                self.r10_scheduler.start()
+            elif not enabled:
+                self.r10_scheduler.stop()
+        self.lbl_r10_status.configure(text="R10: Takip başlatılıyor" if enabled else "R10: Takip kapalı")
+        self.lbl_r10_next.configure(text="Kalan Süre: --")
+
     def _save_url(self):
         url = self.ent_url.get().strip()
         self.config_mgr.config.target_url = url
@@ -966,15 +1077,7 @@ class BionlukBotApp:
             return
 
         listing_id = selected[0]
-        # Veritabanından linki al
-        recent = self.storage.get_recent_listings(limit=200)
-        if self.r10_storage:
-            recent += self.r10_storage.get_recent_listings(limit=200)
-        target_url = None
-        for item in recent:
-            if item.listing_id == listing_id:
-                target_url = item.url
-                break
+        target_url = self._listing_urls.get(listing_id)
 
         if target_url and (target_url.startswith("http://") or target_url.startswith("https://")):
             webbrowser.open(target_url)
@@ -1004,18 +1107,15 @@ class BionlukBotApp:
                     status: SchedulerStatus = msg[1]
                     self._update_status_ui(status)
                 elif msg_type == "R10_STATUS":
-                    status = msg[1]
-                    self.lbl_r10_status.configure(text=f"R10: {status.status_message[:90]}")
-                    if status.requires_login:
-                        self.btn_r10_login.configure(text="🔑  R10 Girişi (Gerekli)", bg="#0284c7")
-                    elif status.last_successful_scan_time and not status.error_message:
-                        self.btn_r10_login.configure(text="✅  R10 Hesabı Bağlı", bg="#f1f5f9")
+                    self._update_r10_status_ui(msg[1])
                 elif msg_type == "R10_LOGIN":
                     ok, detail = msg[1], msg[2]
-                    self.lbl_r10_status.configure(text=f"R10: {detail[:90]}")
+                    detail_text = detail if detail.startswith("R10") else f"R10: {detail}"
+                    self.lbl_r10_status.configure(text=detail_text[:90])
                     self.btn_r10_login.configure(
                         text="✅  R10 Hesabı Bağlı" if ok else "🔑  R10 Girişi (Gerekli)",
                         bg="#f1f5f9" if ok else "#0284c7",
+                        fg="#475569" if ok else "#ffffff",
                     )
                     if not ok:
                         messagebox.showwarning("R10 Oturumu", detail)
@@ -1035,6 +1135,12 @@ class BionlukBotApp:
                         notified=True,
                         matched_keyword=matched_kw,
                     )
+                    source_storage = self.r10_storage if item.id.startswith("r10:") else self.storage
+                    if source_storage:
+                        stored = next(
+                            (row for row in source_storage.get_recent_listings(limit=100)
+                             if row.listing_id == item.id), stored,
+                        )
                     if not self.tree.exists(stored.listing_id):
                         self._insert_tree_item(stored)
             except queue.Empty:
@@ -1043,6 +1149,33 @@ class BionlukBotApp:
                 logger.error(f"Kuyruk işlenirken hata: {e}")
 
         self.root.after(200, self._process_queue)
+
+    def _update_r10_status_ui(self, status: SchedulerStatus):
+        if not self.config_mgr.config.r10_enabled:
+            self.lbl_r10_status.configure(text="R10: Takip kapalı", fg=self.color_text_muted)
+            self.lbl_r10_next.configure(text="Kalan Süre: --")
+            return
+        message = (status.status_message or "Beklemede").removeprefix("R10: ")
+        self.lbl_r10_status.configure(
+            text=f"R10: {message[:70]}",
+            fg="#dc2626" if status.requires_login or status.error_message else self.color_primary,
+        )
+        self.lbl_r10_next.configure(
+            text=f"Kalan Süre: {status.seconds_until_next_scan} sn"
+            if status.seconds_until_next_scan > 0 and status.is_running else "Kalan Süre: --",
+        )
+        if status.last_scan_time:
+            self.lbl_r10_last_scan.configure(text=f"Son Tarama: {status.last_scan_time}")
+        if status.last_successful_scan_time:
+            self.lbl_r10_last_success.configure(text=f"Son Başarılı: {status.last_successful_scan_time}")
+        if status.requires_login:
+            self.btn_r10_login.configure(
+                text="🔑  R10 Girişi (Gerekli)", bg="#0284c7", fg="#ffffff",
+            )
+        elif status.last_successful_scan_time and not status.error_message:
+            self.btn_r10_login.configure(
+                text="✅  R10 Hesabı Bağlı", bg="#f1f5f9", fg="#475569",
+            )
 
     def _update_status_ui(self, status: SchedulerStatus):
         if status.is_running:
@@ -1091,7 +1224,7 @@ class BionlukBotApp:
 
         # Durum mesajı (Bağlantı ve oturum durumu)
         status_text = status.status_message or "Hazır"
-        self.lbl_status_msg.configure(text=f"Durum: {status_text}")
+        self.lbl_status_msg.configure(text=f"Bionluk: {status_text.removeprefix('Bionluk: ')}")
 
         # Kalan Süre
         if status.seconds_until_next_scan > 0 and status.is_running:

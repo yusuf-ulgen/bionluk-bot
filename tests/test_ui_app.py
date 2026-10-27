@@ -3,6 +3,7 @@ import sys
 import tkinter as tk
 import pytest
 from pathlib import Path
+from unittest.mock import Mock
 
 # Tkinter Tcl kitaplık yollarını garantile
 if "TCL_LIBRARY" not in os.environ:
@@ -161,3 +162,59 @@ def test_ui_account_connected_button_style(test_app: BionlukBotApp):
     test_app._update_status_ui(status_connected)
     assert "Hesap Bağlı" in test_app.btn_login.cget("text")
     assert test_app.btn_login.cget("bg") == "#f1f5f9"
+
+
+def test_site_filter_keeps_both_sources_and_restores_order(test_app: BionlukBotApp):
+    bionluk = StoredListing("b-1", "https://bionluk.com/1", "Bionluk işi", notified=True)
+    r10 = StoredListing("r10:42", "https://www.r10.net/yazilim-kodlama-is-verenler/42-is.html", "R10 işi", notified=True)
+    test_app._insert_tree_item(bionluk)
+    test_app._insert_tree_item(r10)
+    assert test_app.tree.set("r10:42", "site") == "R10"
+    assert test_app.tree.set("b-1", "site") == "Bionluk"
+
+    test_app.var_site_filter.set("R10")
+    test_app._apply_site_filter()
+    assert test_app.tree.get_children() == ("r10:42",)
+    test_app.var_site_filter.set("Bionluk")
+    test_app._apply_site_filter()
+    assert test_app.tree.get_children() == ("b-1",)
+    test_app.var_site_filter.set("Tümü")
+    test_app._apply_site_filter()
+    assert test_app.tree.get_children() == ("r10:42", "b-1")
+
+
+def test_shared_scan_buttons_trigger_both_sites(test_app: BionlukBotApp):
+    test_app.scheduler = Mock()
+    test_app.r10_scheduler = Mock()
+    test_app.config_mgr.config.r10_enabled = True
+    test_app._start_scanning()
+    test_app.scheduler.start.assert_called_once()
+    test_app.r10_scheduler.start.assert_called_once()
+    test_app._scan_now()
+    test_app.scheduler.trigger_now.assert_called_once()
+    test_app.r10_scheduler.trigger_now.assert_called_once()
+    assert test_app.btn_login.master is test_app.btn_r10_login.master
+
+
+def test_r10_tracking_toggle_and_separate_status(test_app: BionlukBotApp):
+    test_app.scheduler = Mock()
+    test_app.scheduler.is_running.return_value = True
+    test_app.r10_scheduler = Mock()
+    test_app.var_r10_enabled.set(False)
+    test_app._toggle_r10()
+    assert test_app.config_mgr.config.r10_enabled is False
+    test_app.r10_scheduler.stop.assert_called_once()
+    test_app.var_r10_enabled.set(True)
+    test_app._toggle_r10()
+    test_app.r10_scheduler.start.assert_called_once()
+
+    status = SchedulerStatus(
+        is_running=True, status_message="R10: Aktif (Oturum Açık)",
+        last_scan_time="2026-10-27 14:00:00",
+        last_successful_scan_time="2026-10-27 14:00:00",
+        seconds_until_next_scan=15,
+    )
+    test_app._update_r10_status_ui(status)
+    assert test_app.lbl_r10_status.cget("text") == "R10: Aktif (Oturum Açık)"
+    assert test_app.lbl_r10_next.cget("text") == "Kalan Süre: 15 sn"
+    assert "R10 Hesabı Bağlı" in test_app.btn_r10_login.cget("text")

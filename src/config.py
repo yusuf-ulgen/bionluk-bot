@@ -28,6 +28,7 @@ class AppConfig:
     sound_enabled: bool = True
     autostart_enabled: bool = False
     headless: bool = True
+    r10_enabled: bool = True
 
     def validate(self) -> Tuple[bool, str]:
         """Ayarları doğrular. Geçerliyse (True, ''), değilse (False, 'Hata mesajı') döner."""
@@ -90,6 +91,7 @@ class ConfigManager:
                 sound_enabled=bool(data.get("sound_enabled", True)),
                 autostart_enabled=bool(data.get("autostart_enabled", False)),
                 headless=bool(data.get("headless", True)),
+                r10_enabled=bool(data.get("r10_enabled", True)),
             )
             is_valid, err = cfg.validate()
             if not is_valid:
