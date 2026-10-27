@@ -60,6 +60,8 @@ def find_chrome_executable() -> Optional[Path]:
 
 
 class PlaywrightBionlukAdapter(BaseScraperAdapter):
+    login_url = "https://bionluk.com/login"
+    verify_url = "https://bionluk.com/bugun"
     def __init__(self, profile_dir: Path | str | None = None, headless: bool = True):
         if profile_dir is None:
             base_dir = Path(__file__).resolve().parent.parent.parent
@@ -124,7 +126,7 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
         def _login_worker():
             with self._lock:
                 self._is_logging_in = True
-                login_target = url if ("login" in url) else "https://bionluk.com/login"
+                login_target = url or self.login_url
                 logger.info(f"Normal Google Chrome açılıyor: {chrome_path} (Hedef: {login_target})")
 
                 # Standart Chrome parametreleri (Otomasyon, remote debugging veya stealth YOK!)
@@ -151,6 +153,7 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                     return
 
                 self._active_login_process = None
+                self._is_logging_in = False
 
                 # Chrome'un profil kilit dosyasını bırakması için kısa bekleme
                 for _ in range(10):
@@ -158,11 +161,10 @@ class PlaywrightBionlukAdapter(BaseScraperAdapter):
                         break
                     time.sleep(0.5)
 
-                self._is_logging_in = False
                 logger.info("Chrome kapatıldı. Gerçek Bionluk oturumu doğrulanıyor...")
 
                 # Oturumu /bugun üzerinden doğrula
-                is_valid, verify_msg = self.verify_session("https://bionluk.com/bugun")
+                is_valid, verify_msg = self.verify_session(self.verify_url)
                 logger.info(f"Oturum doğrulama sonucu: {is_valid} ({verify_msg})")
 
                 if on_complete_callback:

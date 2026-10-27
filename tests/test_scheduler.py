@@ -223,13 +223,13 @@ def test_notification_failure_and_controlled_retry(tmp_path: Path):
     # 3. Sonraki taramada bildirim servisi düzeldi -> tekrar denemeli ve teslim etmeli
     notifier.fail_mode = False
     scheduler._execute_scan()
-    assert len(notifier.sent_notifications) == 1
+    assert len(notifier.sent_notifications) == 2
     updated_status = storage.get_recent_listings()[0]
     assert updated_status.notified is True
 
     # 4. Daha sonraki taramada bildirim zaten ulaştığı için tekrar gönderilmemeli
     scheduler._execute_scan()
-    assert len(notifier.sent_notifications) == 1
+    assert len(notifier.sent_notifications) == 2
 
 
 def test_same_title_different_ids_and_title_change(tmp_path: Path):

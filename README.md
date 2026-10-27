@@ -1,6 +1,10 @@
 # Bionluk İlan & Alıcı İstekleri Takip Botu
 
-Bionluk üzerindeki yeni alıcı isteklerini ve iş fırsatlarını takip eden, belirlediğiniz anahtar kelimelere göre filtreleyen ve anında Windows masaüstü bildirimi ile sesli uyarı gönderen yerel masaüstü uygulaması.
+Bionluk alıcı isteklerini ve R10 Yazılım & Kodlama İş Verenler forumundaki yeni konuları takip eden, anahtar kelimelere göre filtreleyen ve Windows masaüstü bildirimi gönderen yerel uygulama.
+
+R10 için **R10 Girişi (Chrome)** düğmesine basın. Açılan iş verenler sayfasının sağ üstündeki **Giriş Yap** bağlantısıyla R10 hesabınıza giriş yapın, ardından Chrome penceresini kapatın. R10 oturumu `data/r10_chrome_profile` içinde, Bionluk oturumu ise `data/chrome_profile` içinde ayrı tutulur. **Taramayı Başlat** her iki siteyi bağımsız izler; biri giriş beklerken diğeri çalışabilir. R10 kategorisinin ilk başarılı okuması mevcut konuları sessizce kaydeder; sonraki yeni konular bildirilir. R10 kayıtları `data/r10_database.sqlite3` içindedir.
+
+R10 sayfası güvenlik doğrulaması veya erişim sınırı gösterirse uygulama bunu durum alanında bildirir. Doğrulamayı Chrome'da elle tamamlayın; uygulama güvenlik kontrolünü aşmaya çalışmaz.
 
 ---
 
@@ -123,5 +127,6 @@ Tüm filtreleme, tekilleştirme, zamanlayıcı ve hata toparlanma testlerini ça
 - `src/notifier.py` : Windows 10/11 Toast bildirimi ve ses kontrolü.
 - `src/scheduler.py` : Arka plan tarama iş döngüsü, bekleme sayacı ve hata yönetimi.
 - `src/scraper/playwright_adapter.py` : Playwright tabanlı Bionluk oturum ve veri çıkarma adaptörü.
+- `src/scraper/r10_adapter.py` : R10 forumu için ayrı oturum ve konu çıkarma adaptörü.
 - `src/ui/app.py` : Tkinter masaüstü arayüzü ve sistem tepsisi entegrasyonu.
 - `baslat.bat` / `baslat.ps1` : Windows tek tıkla başlatıcıları.

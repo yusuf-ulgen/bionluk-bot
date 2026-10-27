@@ -21,6 +21,7 @@ from src.config import ConfigManager
 from src.filter_engine import FilterEngine
 from src.notifier import WindowsNotifier
 from src.scraper.playwright_adapter import PlaywrightBionlukAdapter
+from src.scraper.r10_adapter import PlaywrightR10Adapter
 from src.single_instance import SingleInstanceLock
 from src.storage import Storage
 from src.ui.app import BionlukBotApp
@@ -87,6 +88,8 @@ def main():
         )
         notifier = WindowsNotifier(sound_enabled=config_mgr.config.sound_enabled)
         scraper_adapter = PlaywrightBionlukAdapter(headless=config_mgr.config.headless)
+        r10_adapter = PlaywrightR10Adapter(headless=config_mgr.config.headless)
+        r10_storage = Storage(data_dir / "r10_database.sqlite3")
 
         # 3. Masaüstü arayüzünü aç
         app = BionlukBotApp(
@@ -95,6 +98,8 @@ def main():
             filter_engine=filter_engine,
             notifier=notifier,
             scraper_adapter=scraper_adapter,
+            r10_adapter=r10_adapter,
+            r10_storage=r10_storage,
         )
 
         app.run()

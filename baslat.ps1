@@ -1,9 +1,9 @@
-# Bionluk İlan Takipçisi PowerShell Başlatıcı
+# Bionluk ve R10 İlan Takipçisi PowerShell Başlatıcı
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host "       Bionluk İlan & Alıcı İstekleri Takipçisi" -ForegroundColor Green
+Write-Host "       Bionluk ve R10 İlan Takipçisi" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host ""
 

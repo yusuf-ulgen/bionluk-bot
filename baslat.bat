@@ -1,10 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Bionluk Ilan Takipcisi
+title Bionluk ve R10 Ilan Takipcisi
 
 echo ========================================================
-echo        Bionluk Ilan ve Alici Istekleri Takipcisi
+echo        Bionluk ve R10 Ilan Takipcisi
 echo ========================================================
 echo.
 

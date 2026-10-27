@@ -104,6 +104,12 @@ class Storage:
             cursor.execute("SELECT 1 FROM listings WHERE listing_id = ?", (listing_id,))
             return cursor.fetchone() is not None
 
+    def get_max_r10_thread_id(self) -> int:
+        """R10 için kaydedilmiş en büyük konu numarasını döndürür."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT listing_id FROM listings WHERE listing_id LIKE 'r10:%'")
+            return max((int(row[0][4:]) for row in rows if row[0][4:].isdigit()), default=0)
+
     def save_listing(
         self,
         listing_id: str,

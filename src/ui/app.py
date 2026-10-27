@@ -24,6 +24,7 @@ from ..notifier import WindowsNotifier
 from ..scheduler import JobScheduler, SchedulerStatus
 from ..scraper.base import BaseScraperAdapter, Listing
 from ..storage import Storage, StoredListing
+from ..scraper.r10_adapter import R10_URL
 
 logger = logging.getLogger("bionluk_bot.ui")
 
@@ -61,12 +62,16 @@ class BionlukBotApp:
         notifier: WindowsNotifier,
         scraper_adapter: BaseScraperAdapter,
         root: Optional[tk.Tk] = None,
+        r10_adapter: Optional[BaseScraperAdapter] = None,
+        r10_storage: Optional[Storage] = None,
     ):
         self.config_mgr = config_mgr
         self.storage = storage
         self.filter_engine = filter_engine
         self.notifier = notifier
         self.scraper_adapter = scraper_adapter
+        self.r10_adapter = r10_adapter
+        self.r10_storage = r10_storage
 
         self.root = root if root is not None else tk.Tk()
         self.root.title("Bionluk İlan Takipçisi")
@@ -90,6 +95,22 @@ class BionlukBotApp:
             status_callback=self._on_scheduler_status,
             on_new_listing_callback=self._on_new_listing,
         )
+        self.r10_scheduler = None
+        if self.r10_adapter and self.r10_storage:
+            class R10ConfigView:
+                @property
+                def config(view):
+                    from dataclasses import replace
+                    return replace(self.config_mgr.config, target_url=R10_URL)
+
+            self.r10_scheduler = JobScheduler(
+                config_mgr=R10ConfigView(), storage=self.r10_storage,
+                filter_engine=self.filter_engine, notifier=self.notifier,
+                scraper_adapter=self.r10_adapter, source_name="R10",
+                notify_on_first_scan=False,
+                status_callback=lambda status: self.msg_queue.put(("R10_STATUS", self._copy_status(status))),
+                on_new_listing_callback=self._on_new_listing,
+            )
 
         self._apply_styles()
         self._build_ui()
@@ -179,7 +200,7 @@ class BionlukBotApp:
 
         tk.Label(
             top_row,
-            text="⚡  Bionluk İlan & Alıcı İstekleri Takipçisi",
+            text="⚡  Bionluk & R10 İş İlanı Takipçisi",
             font=("Segoe UI", 13, "bold"),
             bg=self.color_card,
             fg="#0f172a",
@@ -348,6 +369,20 @@ class BionlukBotApp:
             command=self._open_login_browser,
         )
         self.btn_login.pack(side=tk.LEFT, padx=(0, 8))
+
+        r10_row = tk.Frame(tab_controls, bg=self.color_card)
+        r10_row.pack(fill=tk.X, pady=(8, 0))
+        self.btn_r10_login = tk.Button(
+            r10_row, text="🔑  R10 Girişi (Chrome)", font=("Segoe UI", 9, "bold"),
+            bg="#0284c7", fg="#ffffff", relief="flat", padx=12, pady=7,
+            cursor="hand2", command=self._open_r10_login,
+        )
+        self.btn_r10_login.pack(side=tk.LEFT, padx=(0, 12))
+        self.lbl_r10_status = tk.Label(
+            r10_row, text="R10: Giriş bekleniyor", bg=self.color_card,
+            fg=self.color_text_muted, font=("Segoe UI", 9),
+        )
+        self.lbl_r10_status.pack(side=tk.LEFT)
 
         self.btn_test_notif = tk.Button(
             ctrl_row,
@@ -603,7 +638,7 @@ class BionlukBotApp:
         # Bilgi Notu
         tk.Label(
             main_frame,
-            text="* İlana çift tıklayarak veya butona basarak doğrudan Bionluk üzerinde açabilirsiniz.",
+            text="* İlana çift tıklayarak ilgili sitede açabilirsiniz.",
             font=("Segoe UI", 8),
             bg=self.color_bg,
             fg=self.color_text_muted,
@@ -628,13 +663,6 @@ class BionlukBotApp:
         last_success = self.storage.get_last_successful_scan()
         if last_success:
             self.lbl_last_success.configure(text=f"Son Başarılı: {last_success}")
-            self.btn_login.configure(
-                text="✅  Hesap Bağlı (Chrome)",
-                bg="#f1f5f9",
-                fg="#475569",
-                activebackground="#e2e8f0",
-                activeforeground="#1e293b",
-            )
 
         # Eski oturumdan kalan ilanlar yüklenmez; tablo mevcut çalışma oturumuna özel başlar.
 
@@ -727,33 +755,23 @@ class BionlukBotApp:
     # --- BUTON VE AKSİYON İŞLEYİCİLERİ ---
 
     def _start_scanning(self):
-        if self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked():
-            messagebox.showwarning(
-                "Giriş Penceresi Açık",
-                "Chrome giriş penceresi şu anda açık veya profil kullanımda.\n\n"
-                "Lütfen Bionluk hesabınıza giriş yaptıktan sonra açılan Chrome penceresini kapatın.",
-            )
-            return
-
         self._set_btn_state(self.btn_start, False, "#00a885")
         self._set_btn_state(self.btn_stop, True, "#ef4444")
         self.scheduler.start()
+        if self.r10_scheduler:
+            self.r10_scheduler.start()
 
     def _stop_scanning(self):
         self.scheduler.stop()
+        if self.r10_scheduler:
+            self.r10_scheduler.stop()
         self._set_btn_state(self.btn_start, True, "#00a885")
         self._set_btn_state(self.btn_stop, False, "#ef4444")
 
     def _scan_now(self):
-        if self.scraper_adapter.is_login_in_progress() or self.scraper_adapter.is_profile_locked():
-            messagebox.showwarning(
-                "Giriş Penceresi Açık",
-                "Chrome giriş penceresi şu anda açık veya profil kullanımda.\n\n"
-                "Lütfen giriş işlemini tamamlayıp Chrome penceresini kapatın.",
-            )
-            return
-
         self.scheduler.trigger_now()
+        if self.r10_scheduler:
+            self.r10_scheduler.trigger_now()
         self._set_btn_state(self.btn_start, False, "#00a885")
         self._set_btn_state(self.btn_stop, True, "#ef4444")
 
@@ -825,7 +843,23 @@ class BionlukBotApp:
                     f"Lütfen 'Bionluk Girişi Yap' düğmesine basarak hesabınıza başarıyla giriş yaptığınızdan emin olun.",
                 )
 
-        self.root.after(0, _ui_update)
+        self.msg_queue.put(("LOGIN_RESULT", _ui_update))
+
+    def _open_r10_login(self):
+        if not self.r10_adapter:
+            return
+        if self.r10_adapter.is_profile_locked():
+            messagebox.showinfo("R10 Girişi", "R10 Chrome penceresi zaten açık. Girişten sonra pencereyi kapatın.")
+            return
+        messagebox.showinfo(
+            "R10 Girişi",
+            "R10 iş verenler sayfası Chrome'da açılacak. Sağ üstteki 'Giriş Yap' bağlantısını kullanın. "
+            "Girişten sonra Chrome penceresini kapatın; oturum doğrulanıp takip sürecek.",
+        )
+        self.lbl_r10_status.configure(text="R10: Chrome giriş penceresi açık")
+        self.r10_adapter.open_login_session(
+            R10_URL, on_complete_callback=lambda ok, msg: self.msg_queue.put(("R10_LOGIN", ok, msg)),
+        )
 
     def _send_test_notification(self):
         ok, err = self.notifier.send_test_notification()
@@ -934,6 +968,8 @@ class BionlukBotApp:
         listing_id = selected[0]
         # Veritabanından linki al
         recent = self.storage.get_recent_listings(limit=200)
+        if self.r10_storage:
+            recent += self.r10_storage.get_recent_listings(limit=200)
         target_url = None
         for item in recent:
             if item.listing_id == listing_id:
@@ -948,7 +984,12 @@ class BionlukBotApp:
     # --- DURUM VE KUYRUK YÖNETİMİ ---
 
     def _on_scheduler_status(self, status: SchedulerStatus):
-        self.msg_queue.put(("STATUS", status))
+        self.msg_queue.put(("STATUS", self._copy_status(status)))
+
+    @staticmethod
+    def _copy_status(status: SchedulerStatus) -> SchedulerStatus:
+        from dataclasses import replace
+        return replace(status)
 
     def _on_new_listing(self, item: Listing, matched_keyword: str):
         self.msg_queue.put(("NEW_LISTING", item, matched_keyword))
@@ -962,6 +1003,24 @@ class BionlukBotApp:
                 if msg_type == "STATUS":
                     status: SchedulerStatus = msg[1]
                     self._update_status_ui(status)
+                elif msg_type == "R10_STATUS":
+                    status = msg[1]
+                    self.lbl_r10_status.configure(text=f"R10: {status.status_message[:90]}")
+                    if status.requires_login:
+                        self.btn_r10_login.configure(text="🔑  R10 Girişi (Gerekli)", bg="#0284c7")
+                    elif status.last_successful_scan_time and not status.error_message:
+                        self.btn_r10_login.configure(text="✅  R10 Hesabı Bağlı", bg="#f1f5f9")
+                elif msg_type == "R10_LOGIN":
+                    ok, detail = msg[1], msg[2]
+                    self.lbl_r10_status.configure(text=f"R10: {detail[:90]}")
+                    self.btn_r10_login.configure(
+                        text="✅  R10 Hesabı Bağlı" if ok else "🔑  R10 Girişi (Gerekli)",
+                        bg="#f1f5f9" if ok else "#0284c7",
+                    )
+                    if not ok:
+                        messagebox.showwarning("R10 Oturumu", detail)
+                elif msg_type == "LOGIN_RESULT":
+                    msg[1]()
                 elif msg_type == "NEW_LISTING":
                     item: Listing = msg[1]
                     matched_kw: str = msg[2]
@@ -976,7 +1035,8 @@ class BionlukBotApp:
                         notified=True,
                         matched_keyword=matched_kw,
                     )
-                    self._insert_tree_item(stored)
+                    if not self.tree.exists(stored.listing_id):
+                        self._insert_tree_item(stored)
             except queue.Empty:
                 break
             except Exception as e:
@@ -1011,7 +1071,7 @@ class BionlukBotApp:
                 activebackground="#0369a1",
                 activeforeground="#ffffff",
             )
-        elif status.last_successful_scan_time or "Aktif" in (status.status_message or ""):
+        elif not status.error_message and (status.last_successful_scan_time or "Aktif" in (status.status_message or "")):
             # Hesap bağlı -> Soluk/sakin renk ve "Hesap Bağlı"
             self.btn_login.configure(
                 text="✅  Hesap Bağlı (Chrome)",
@@ -1188,11 +1248,15 @@ class BionlukBotApp:
         logger.info("Uygulama tamamen kapatılıyor...")
         try:
             self.scheduler.stop()
+            if self.r10_scheduler:
+                self.r10_scheduler.stop()
         except Exception:
             pass
 
         try:
             self.scraper_adapter.close()
+            if self.r10_adapter:
+                self.r10_adapter.close()
         except Exception:
             pass
 

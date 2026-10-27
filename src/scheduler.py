@@ -43,6 +43,8 @@ class JobScheduler:
         scraper_adapter: BaseScraperAdapter,
         status_callback: Optional[Callable[[SchedulerStatus], None]] = None,
         on_new_listing_callback: Optional[Callable[[Listing, str], None]] = None,
+        source_name: str = "Bionluk",
+        notify_on_first_scan: bool = True,
     ):
         self.config_mgr = config_mgr
         self.storage = storage
@@ -51,6 +53,8 @@ class JobScheduler:
         self.scraper_adapter = scraper_adapter
         self.status_callback = status_callback
         self.on_new_listing_callback = on_new_listing_callback
+        self.source_name = source_name
+        self.notify_on_first_scan = notify_on_first_scan
 
         self._stop_event = threading.Event()
         self._trigger_now_event = threading.Event()
@@ -137,7 +141,7 @@ class JobScheduler:
 
                 self.status.seconds_until_next_scan = remaining
                 if not self.status.status_message or "Sonraki taramaya" in self.status.status_message:
-                    self.status.status_message = "Bionluk Bağlantısı: Aktif (Oturum Açık)"
+                    self.status.status_message = f"{self.source_name}: Aktif (Oturum Açık)"
                 self._notify_status()
 
                 # 1.0 saniyelik adımlarla bekle, stop sinyalinde anında çık
@@ -218,6 +222,7 @@ class JobScheduler:
 
             listings = scrape_result.listings
             logger.info(f"Sayfadan {len(listings)} adet ilan okundu.")
+            previous_r10_max = self.storage.get_max_r10_thread_id() if self.source_name == "R10" else 0
 
             is_first_baseline = not self.storage.is_baseline_established()
             new_items_count = 0
@@ -249,13 +254,13 @@ class JobScheduler:
                         continue
 
                     # Yalnızca en güncel 1 ilanı test amaçlı bildir
-                    if not first_notif_sent:
+                    if not first_notif_sent and self.notify_on_first_scan:
                         first_notif_sent = True
                         new_items_count += 1
                         budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
                         msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
                         sent_ok, send_err = self.notifier.send_notification(
-                            title="Bionluk Takipçisi Aktif (Son İlan)",
+                            title=f"{self.source_name} Takipçisi Aktif (Son İlan)",
                             message=msg,
                             url=item.url,
                         )
@@ -266,9 +271,10 @@ class JobScheduler:
                             description=item.description,
                             budget=item.budget,
                             category=item.category,
-                            notified=True,
+                            notified=sent_ok,
                             matched_keyword=eval_res.matched_include or "Başlangıç İlanı",
                         )
+                        self.storage.record_notification_result(item.id, sent_ok, send_err)
                         if self.on_new_listing_callback:
                             try:
                                 self.on_new_listing_callback(item, eval_res.matched_include or "")
@@ -289,12 +295,20 @@ class JobScheduler:
 
                 self.storage.set_baseline_established()
                 self._is_first_scan_of_session = False
-                self.status.status_message = "Bionluk Bağlantısı: Aktif (Oturum Açık)"
+                self.status.status_message = f"{self.source_name}: Aktif (Oturum Açık)"
             else:
                 # Normal tarama döngüsü
                 new_matching_items = []
                 for item in listings:
                     if not self.storage.is_listing_seen(item.id):
+                        if self.source_name == "R10" and item.id.startswith("r10:") and int(item.id[4:]) <= previous_r10_max:
+                            self.storage.save_listing(
+                                listing_id=item.id, url=item.url, title=item.title,
+                                description=item.description, budget=item.budget,
+                                category=item.category, notified=True,
+                                matched_keyword="Başlangıç Kaydı",
+                            )
+                            continue
                         eval_res = self.filter_engine.evaluate(item.title, item.description)
                         if eval_res.is_match:
                             new_matching_items.append((item, eval_res))
@@ -317,7 +331,7 @@ class JobScheduler:
                             matched_kw = self.storage.get_matched_keyword(item.id) or "Filtre Eşleşmesi"
                             msg = f"{item.title}{budget_info}\nEşleşen: {matched_kw}"
                             sent_ok, send_err = self.notifier.send_notification(
-                                title="Yeni Bionluk İlanı!",
+                                title=f"Yeni {self.source_name} İlanı!",
                                 message=msg,
                                 url=item.url,
                             )
@@ -325,7 +339,15 @@ class JobScheduler:
 
                 # Eğer oturum başlangıcında birden fazla yeni ilan varsa (çalıştırmadan önceki ilanlar):
                 # Yalnızca en yeni 1 tanesini bildir, diğerlerini sessizce kaydet
-                if self._is_first_scan_of_session and len(new_matching_items) > 1:
+                if self._is_first_scan_of_session and not self.notify_on_first_scan:
+                    for item, eval_res in new_matching_items:
+                        self.storage.save_listing(
+                            listing_id=item.id, url=item.url, title=item.title,
+                            description=item.description, budget=item.budget,
+                            category=item.category, notified=True,
+                            matched_keyword=eval_res.matched_include or "Başlangıç Kaydı",
+                        )
+                elif self._is_first_scan_of_session and len(new_matching_items) > 1:
                     logger.info(f"Oturum başlangıcında {len(new_matching_items)} ilan bulundu. Yalnızca en yeni 1 ilan için bildirim gönderiliyor.")
                     for idx, (item, eval_res) in enumerate(new_matching_items):
                         if idx == 0:
@@ -333,7 +355,7 @@ class JobScheduler:
                             budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
                             msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
                             sent_ok, send_err = self.notifier.send_notification(
-                                title="Bionluk Takipçisi Aktif (Son İlan)",
+                                title=f"{self.source_name} Takipçisi Aktif (Son İlan)",
                                 message=msg,
                                 url=item.url,
                             )
@@ -344,9 +366,10 @@ class JobScheduler:
                                 description=item.description,
                                 budget=item.budget,
                                 category=item.category,
-                                notified=True,
+                                notified=sent_ok,
                                 matched_keyword=eval_res.matched_include or "",
                             )
+                            self.storage.record_notification_result(item.id, sent_ok, send_err)
                             if self.on_new_listing_callback:
                                 try:
                                     self.on_new_listing_callback(item, eval_res.matched_include or "")
@@ -371,7 +394,7 @@ class JobScheduler:
                         budget_info = f" [Bütçe: {item.budget}]" if item.budget else ""
                         msg = f"{item.title}{budget_info}\nEşleşen: {eval_res.matched_include or 'Tümü'}"
                         sent_ok, send_err = self.notifier.send_notification(
-                            title="Yeni Bionluk İlanı!",
+                            title=f"Yeni {self.source_name} İlanı!",
                             message=msg,
                             url=item.url,
                         )
@@ -394,7 +417,7 @@ class JobScheduler:
                                 logger.error(f"Yeni ilan bildirim callback hatası: {cb_err}")
 
                 self._is_first_scan_of_session = False
-                self.status.status_message = "Bionluk Bağlantısı: Aktif (Oturum Açık)"
+                self.status.status_message = f"{self.source_name}: Aktif (Oturum Açık)"
 
             self.storage.log_scan(
                 success=True,

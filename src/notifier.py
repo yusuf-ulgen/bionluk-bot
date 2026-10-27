@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger("bionluk_bot.notifier")
 
-APP_ID = "Bionluk İlan Takipçisi"
+APP_ID = "Bionluk ve R10 İlan Takipçisi"
 
 
 class WindowsNotifier:
@@ -71,19 +71,14 @@ class WindowsNotifier:
             toast.show()
             logger.info(f"Bildirim gönderildi: {title}")
             return True, ""
-        except Exception as e:
-            logger.warning(f"winotify ile bildirim gönderilemedi: {e}. Basit uyarı deneniyor.")
-
-        # 2. Alternatif: Tkinter messagebox veya standart bildirim (fallback)
-        try:
-            return False, f"Bildirim altyapısı hatası: {e}"
-        except Exception as ex:
-            return False, str(ex)
+        except Exception as exc:
+            logger.warning("Masaüstü bildirimi gönderilemedi: %s", exc)
+            return False, f"Bildirim altyapısı hatası: {exc}"
 
     def send_test_notification(self) -> Tuple[bool, str]:
         """Kullanıcının bildirim ve ses sistemini denemesi için test bildirimi gönderir."""
         return self.send_notification(
-            title="Test Bildirimi - Bionluk Botu",
+            title="Test Bildirimi - İlan Takipçisi",
             message="Bildirim ve ses sistemi düzgün çalışıyor!",
             url="https://bionluk.com",
             sound=True,
